@@ -43,7 +43,7 @@ Depends:
  dh-python (= ${source:Version}),
  python3-build (>> 0.7~),
  python3-installer,
- python3-tomli,
+ python3-tomli | python3 (>> 3.11),
  ${misc:Depends}
 Description: Debian helper tools for packaging Python libraries using PEP517
  This metapackage depends on the components necessary for building packages
