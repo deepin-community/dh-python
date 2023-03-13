@@ -1,3 +1,10 @@
+dh-python (5.20230130-0deepin1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Use tomllib in python3 (>> 3.11)
+
+ -- Tianyu Chen <chentianyu1@uniontech.com>  Mon, 13 Mar 2023 14:49:46 +0800
+
 dh-python (5.20230130) unstable; urgency=medium
 
   * pybuild.pm: Export SETUPTOOLS_SCM_PRETEND_VERSION for packages using
