@@ -23,8 +23,10 @@ from functools import wraps
 from glob import glob1
 from os import remove, walk
 from os.path import exists, isdir, join
+from pathlib import Path
 from subprocess import Popen, PIPE
 from shutil import rmtree, copyfile, copytree
+from dhpython.debhelper import DebHelper, build_options
 from dhpython.exceptions import RequiredCommandMissingException
 from dhpython.tools import execute
 try:
@@ -47,7 +49,7 @@ def copy_test_files(dest='{build_dir}',
 
         @wraps(func)
         def __copy_test_files(self, context, args, *oargs, **kwargs):
-            files_to_copy = {'test', 'tests'}
+            files_to_copy = {'pyproject.toml', 'pytest.ini', 'test', 'tests'}
             # check debian/pybuild_pythonX.Y.testfiles
             for tpl in ('_{i}{v}', '_{i}{m}', ''):
                 tpl = tpl.format(i=args['interpreter'].name,
@@ -67,6 +69,7 @@ def copy_test_files(dest='{build_dir}',
                 dst_dpath = join(dest.format(**args), name.rsplit('/', 1)[-1])
                 if exists(src_dpath):
                     if not exists(dst_dpath):
+                        log.debug("Copying %s to %s for tests", src_dpath, dst_dpath)
                         if isdir(src_dpath):
                             copytree(src_dpath, dst_dpath)
                         else:
@@ -160,13 +163,12 @@ class Base:
         return result
 
     def clean(self, context, args):
-        if self.cfg.test_tox:
-            tox_dir = join(args['dir'], '.tox')
-            if isdir(tox_dir):
-                try:
-                    rmtree(tox_dir)
-                except Exception:
-                    log.debug('cannot remove %s', tox_dir)
+        tox_dir = join(args['dir'], '.tox')
+        if isdir(tox_dir):
+            try:
+                rmtree(tox_dir)
+            except Exception:
+                log.debug('cannot remove %s', tox_dir)
 
         for fn in self.CLEAN_FILES:
             path = join(context['dir'], fn)
@@ -181,9 +183,16 @@ class Base:
                 except Exception:
                     log.debug('cannot remove %s', path)
 
+        dh = DebHelper(build_options())
+        # Plugins that rely on repository contents to build MANIFEST
+        clean_sources_txt = not set(
+            ('python3-setuptools-scm', 'python3-setuptools-git')
+        ).intersection(set(dh.build_depends))
+
         for root, dirs, file_names in walk(context['dir']):
             for name in dirs:
-                if name == '__pycache__':
+                if name == '__pycache__' or (
+                        clean_sources_txt and name.endswith('.egg-info')):
                     dpath = join(root, name)
                     log.debug('removing dir: %s', dpath)
                     try:
@@ -200,6 +209,15 @@ class Base:
                         remove(fpath)
                     except Exception:
                         log.debug('cannot remove %s', fpath)
+            if root.endswith('.egg-info'):
+                for fn in file_names:
+                    if fn != 'SOURCES.txt':
+                        fpath = join(root, fn)
+                        log.debug('removing: %s', fpath)
+                        try:
+                            remove(fpath)
+                        except Exception:
+                            log.debug('cannot remove %s', fpath)
 
     def configure(self, context, args):
         raise NotImplementedError("configure method not implemented in %s" % self.NAME)
@@ -219,16 +237,68 @@ class Base:
         elif self.cfg.test_pytest:
             return 'cd {build_dir}; {interpreter} -m pytest {args}'
         elif self.cfg.test_tox:
-            # tox will call pip to install the module. Let it install the
-            # module inside the virtualenv
-            pydistutils_cfg = join(args['home_dir'], '.pydistutils.cfg')
-            if exists(pydistutils_cfg):
-                remove(pydistutils_cfg)
-            return 'cd {build_dir}; tox -c {dir}/tox.ini --sitepackages -e py{version.major}{version.minor} {args}'
+            tox_config = None
+            if exists(join(args['dir'], 'tox.ini')):
+                tox_config = '{dir}/tox.ini'
+            elif exists(join(args['dir'], 'pyproject.toml')):
+                tox_config = '{dir}/pyproject.toml'
+            elif exists(join(args['dir'], 'setup.cfg')):
+                tox_config = '{dir}/setup.cfg'
+            else:
+                raise Exception("tox config not found. "
+                    "Expected to find tox.ini, pyproject.toml, or setup.cfg")
+
+            tox_cmd = ['cd {build_dir};',
+                   'tox',
+                   '-c', tox_config,
+                   '--sitepackages',
+                   '-e', 'py{version.major}{version.minor}',
+                   '-x', 'testenv.passenv+=_PYTHON_HOST_PLATFORM',
+            ]
+            if args['autopkgtest']:
+                tox_cmd += ['--skip-pkg-install']
+
+            # --installpkg was added in tox 4. Keep tox 3 support for now,
+            # for backportability
+            r = execute(['tox', '--version', '--quiet'], shell=False)
+            major_version = int(r['stdout'].split('.', 1)[0])
+            if major_version < 4:
+                # tox will call pip to install the module. Let it install the
+                # module inside the virtualenv
+                pydistutils_cfg = join(args['home_dir'], '.pydistutils.cfg')
+                if exists(pydistutils_cfg):
+                    remove(pydistutils_cfg)
+            else:
+                if not args['autopkgtest']:
+                    wheel = self.built_wheel(context, args)
+                    if not wheel:
+                        self.build_wheel(context, args)
+                        wheel = self.built_wheel(context, args)
+                    args['wheel'] = wheel
+                    tox_cmd += ['--installpkg', '{wheel}']
+
+            tox_cmd.append('{args}')
+            return ' '.join(tox_cmd)
         elif self.cfg.test_custom:
             return 'cd {build_dir}; {args}'
         elif args['version'] == '2.7' or args['version'] >> '3.1' or args['interpreter'] == 'pypy':
+            # Temporary: Until Python 3.12 is established, and packages without
+            # test suites have explicitly disabled tests.
+            args['ignore_no_tests'] = True
             return 'cd {build_dir}; {interpreter} -m unittest discover -v {args}'
+
+    def build_wheel(self, context, args):
+        raise NotImplementedError("build_wheel method not implemented in %s" % self.NAME)
+
+    def built_wheel(self, context, args):
+        """Return the path to any built wheels we can find"""
+        wheels = list(Path(args['home_dir']).glob('*.whl'))
+        n_wheels = len(wheels)
+        if n_wheels > 1:
+            raise Exception(f"Expecting to have built exactly 1 wheel, but found {n_wheels}")
+        elif n_wheels == 1:
+            return str(wheels[0])
+        return None
 
     def execute(self, context, args, command, log_file=None):
         if log_file is False and self.cfg.really_quiet:
@@ -283,7 +353,10 @@ def shell_command(func):
         command = command.format(**quoted_args)
 
         output = self.execute(context, args, command, log_file)
-        if output['returncode'] != 0:
+        if output['returncode'] == 5 and args.get('ignore_no_tests', False):
+            # Temporary hack (see Base.test)
+            pass
+        elif output['returncode'] != 0:
             msg = 'exit code={}: {}'.format(output['returncode'], command)
             if log_file:
                 msg += '\nfull command log is available in {}'.format(log_file)

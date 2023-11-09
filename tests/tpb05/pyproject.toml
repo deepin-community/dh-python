@@ -7,10 +7,10 @@ name = "foo"
 description = "an example module"
 version = "0.1"
 authors = ["Stefano Rivera <stefanor@debian.org>"]
-license = "Expat"
+license = "Expat AND BSD-3 AND ISC"
 
 [tool.poetry.dependencies]
-tomli = "^1.0.0"
+cachy = "^0.3.0"
 importlib-metadata = { version="*", python = "<3.5" }
 
 [tool.poetry.scripts]

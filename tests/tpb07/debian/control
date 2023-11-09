@@ -4,8 +4,10 @@ Priority: optional
 Maintainer: Piotr Ożarowski <piotr@debian.org>
 Build-Depends: debhelper-compat (= 12)
  , python3-all
+ , python3-pytest
  , python3-setuptools
  , pybuild-plugin-pyproject
+ , tox (>= 4)
 Standards-Version: 3.9.4
 
 Package: python3-foo

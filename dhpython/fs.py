@@ -19,15 +19,13 @@
 # THE SOFTWARE.
 
 import difflib
-import hashlib
 import logging
 import os
 import re
 import sys
 from filecmp import cmp as cmpfile
-from glob import glob
-from os.path import (lexists, exists, getsize, isdir, islink, join, realpath,
-                     relpath, split, splitext)
+from os.path import (lexists, exists, isdir, islink, join, realpath, split,
+                     splitext)
 from shutil import rmtree
 from stat import ST_MODE, S_IXUSR, S_IXGRP, S_IXOTH
 from dhpython import MULTIARCH_DIR_TPL
@@ -98,20 +96,12 @@ def share_files(srcdir, dstdir, interpreter, options):
                 fpath1 = Scan.rename_ext(fpath1, interpreter, version)
                 i = split(fpath1)[-1]
         if srcdir.endswith(".dist-info"):
-            if i in ('COPYING', 'LICENSE') or i.startswith(
-                    ('COPYING.', 'LICENSE.')):
-                os.remove(fpath1)
-                cleanup_actions.append((remove_from_RECORD, ([i],)))
-                continue
-            elif isdir(fpath1) and i in ('licenses', 'license_files'):
-                cleanup_actions.append((
-                    remove_from_RECORD,
-                    ([
-                        relpath(license, srcdir)
-                        for license in glob(join(srcdir, i, '**'))
-                    ],)
-                ))
-                rmtree(fpath1)
+            if (i.startswith(('LICENCE', 'LICENSE', 'COPYING', 'NOTICE', 'AUTHORS'))
+                    or i in ('licenses', 'license_files')):
+                if isdir(fpath1):
+                    rmtree(fpath1)
+                else:
+                    os.remove(fpath1)
                 continue
         fpath2 = join(dstdir, i)
         if not isdir(fpath1) and not exists(fpath2):
@@ -134,11 +124,6 @@ def share_files(srcdir, dstdir, interpreter, options):
         elif srcdir.endswith(".dist-info"):
             # dist-info file that differs... try merging
             if i == "WHEEL":
-                if merge_WHEEL(fpath1, fpath2):
-                    cleanup_actions.append((fix_merged_RECORD, ()))
-                os.remove(fpath1)
-            elif i == "RECORD":
-                merge_RECORD(fpath1, fpath2)
                 os.remove(fpath1)
             else:
                 log.warn("No merge driver for dist-info file %s", i)
@@ -196,68 +181,24 @@ def merge_WHEEL(src, dst):
     return len(missing)
 
 
-def merge_RECORD(src, dst):
-    """Merge the source .dist-info/RECORD file into the destination"""
-    log.debug("Merging RECORD file %s into %s", src, dst)
-    missing = missing_lines(src, dst)
-
-    with open(dst, "at") as fh:
-        for line in missing:
-            fh.write(line)
-
-    return len(missing)
+def write_INSTALLER(distdir):
+    """Write 'debain' as the INSTALLER"""
+    log.debug("Writing INSTALLER in %s", distdir)
+    installer = join(distdir, "INSTALLER")
+    with open(installer, "w") as f:
+        f.write("debian\n")
 
 
-def fix_merged_RECORD(distdir):
-    """Update the checksum for .dist-info/WHEEL in .dist-info/RECORD
+def remove_RECORD(distdir):
+    """Remove RECORD from a .dist-info.
 
-    After merging the .dist-info/WHEEL file, the sha256 recorded for it will be
-    wrong in .dist-info/RECORD, so edit that file to ensure that it is fixed.
-    The output is sorted for reproducibility.
+    Having this breaks multi-arch installation, as the contents differ.
     """
-    log.debug("Fixing RECORD file in %s", distdir)
-    record_path = join(distdir, "RECORD")
-    wheel_path = join(distdir, "WHEEL")
-    wheel_dir = split(split(record_path)[0])[1]
-    wheel_relpath = join(wheel_dir, "WHEEL")
-
-    with open(wheel_path, "rb") as fh:
-        wheel_sha256 = hashlib.sha256(fh.read()).hexdigest();
-    wheel_size = getsize(wheel_path)
-
-    contents = [
-        "{name},sha256={sha256sum},{size}\n".format(
-            name=wheel_relpath,
-            sha256sum=wheel_sha256,
-            size=wheel_size,
-        )]
-    with open(record_path) as fh:
-        for line in fh.readlines():
-            if not line.startswith(wheel_relpath):
-                contents.append(line)
-    # now write out the updated record
-    with open(record_path, "wt") as fh:
-        fh.writelines(sorted(contents))
-
-
-def remove_from_RECORD(distdir, files):
-    """Remove all specified dist-info files from RECORD"""
-    log.debug("Removing %r from RECORD in %s", files, distdir)
-    record = join(distdir, "RECORD")
-    parent_dir = split(distdir)[1]
-    names = [join(parent_dir, name) for name in files]
-    lines = []
-    with open(record) as fh:
-        lines = fh.readlines()
-
-    filtered = [line for line in lines if not line.split(',', 1)[0] in names]
-
-    if lines == filtered:
-        log.warn("Unable to remove %r from RECORD in %s, not found",
-                 files, distdir)
-
-    with open(record, 'wt') as fh:
-        fh.writelines(sorted(filtered))
+    log.debug("Deleting RECORD in %s", distdir)
+    try:
+        os.remove(join(distdir, "RECORD"))
+    except FileNotFoundError:
+        pass
 
 
 class Scan:
@@ -540,6 +481,8 @@ class Scan:
                 self.result['requires.txt'].add(join(dpath, 'requires.txt'))
             if 'namespace_packages.txt' in file_names:
                 self.result['nsp.txt'].add(join(dpath, 'namespace_packages.txt'))
+            if 'PKG-INFO' in file_names:
+                self.result['egg-info'].add(join(dpath, 'PKG-INFO'))
             if 'SOURCES.txt' in file_names:
                 os.remove(join(dpath, 'SOURCES.txt'))
                 file_names.remove('SOURCES.txt')
@@ -572,6 +515,8 @@ class Scan:
             return
 
         if file_names:
+            write_INSTALLER(dpath)
+            remove_RECORD(dpath)
             if 'METADATA' in file_names:
                 self.result['dist-info'].add(join(dpath, 'METADATA'))
 
