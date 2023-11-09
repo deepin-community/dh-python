@@ -6,7 +6,7 @@ Depends:
  fakeroot,
  libjs-jquery,
  python3-all-dbg,
- python3-all-dev
+ python3-all-dev,
 Restrictions: allow-stderr
 
 Tests: nosetests
@@ -15,7 +15,7 @@ Depends:
  flit,
  python3-all,
  python3-all-dbg,
- python3-nose2
+ python3-nose2,
 Restrictions: allow-stderr
 
 Tests: pybuild
@@ -23,15 +23,16 @@ Depends:
  build-essential,
  debhelper,
  dh-python,
- pybuild-plugin-pyproject,
- flit,
  fakeroot,
+ flit,
+ pybuild-plugin-pyproject,
  python3-all-dev,
+ python3-cachy,
  python3-poetry-core,
  python3-pytest,
  python3-setuptools,
- python3-tomli,
- tox
+ python3-setuptools-scm,
+ tox (>= 4),
 Restrictions: allow-stderr
 
 Tests: pybuild-autopkgtest
@@ -42,4 +43,6 @@ Depends:
  make,
  pybuild-plugin-pyproject,
  python3-all,
+ python3-pytest,
+ tox
 Restrictions: allow-stderr

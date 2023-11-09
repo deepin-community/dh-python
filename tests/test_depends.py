@@ -120,13 +120,13 @@ class TestRequiresCPython3(DependenciesTestCase):
     pydist = {
         'bar': 'python3-bar',
         'baz': {'dependency': 'python3-baz', 'standard': 'PEP386'},
-        'quux': {'dependency': 'python3-quux', 'standard': 'PEP386'},
+        'quux': {'dependency': 'python3-quux', 'standard': 'PEP440'},
     }
     requires = {
         'debian/foo/usr/lib/python3/dist-packages/foo.egg-info/requires.txt': (
             'bar',
             'baz >= 1.0',
-            'quux',
+            'quux >= 1.0a1',
         ),
     }
 
@@ -136,6 +136,9 @@ class TestRequiresCPython3(DependenciesTestCase):
     def test_depends_on_baz(self):
         self.assertIn('python3-baz (>= 1.0)', self.d.depends)
 
+    def test_depends_on_quux(self):
+        self.assertIn('python3-quux (>= 1.0~a1)', self.d.depends)
+
 
 class TestRequiresPyPy(DependenciesTestCase):
     impl = 'pypy'
@@ -143,13 +146,13 @@ class TestRequiresPyPy(DependenciesTestCase):
     pydist = {
         'bar': 'pypy-bar',
         'baz': {'dependency': 'pypy-baz', 'standard': 'PEP386'},
-        'quux': {'dependency': 'pypy-quux', 'standard': 'PEP386'},
+        'quux': {'dependency': 'pypy-quux', 'standard': 'PEP440'},
     }
     requires = {
         'debian/foo/usr/lib/pypy/dist-packages/foo.egg-info/requires.txt': (
             'bar',
             'baz >= 1.0',
-            'quux',
+            'quux >= 1.0a1',
         )
     }
 
@@ -158,6 +161,9 @@ class TestRequiresPyPy(DependenciesTestCase):
 
     def test_depends_on_baz(self):
         self.assertIn('pypy-baz (>= 1.0)', self.d.depends)
+
+    def test_depends_on_quux(self):
+        self.assertIn('pypy-quux (>= 1.0~a1)', self.d.depends)
 
 
 class TestRequiresCompatible(DependenciesTestCase):
@@ -421,79 +427,82 @@ class TestEnvironmentMarkersDistInfo(DependenciesTestCase):
         self.assertNotInDepends('python3-python-version-lt30')
 
     def test_depends_on_py_version_lt_35_packages(self):
-        self.assertIn('python3-python-version-lt35 | python3 (>> 3.5)',
-                      self.d.depends)
+        self.assertIn('python3-python-version-lt35 '
+                      '| python3-supported-min (>= 3.5)', self.d.depends)
 
     def test_depends_on_py_version_le_35_packages(self):
-        self.assertIn('python3-python-version-le35 | python3 (>> 3.6)',
-                      self.d.depends)
+        self.assertIn('python3-python-version-le35 '
+                      '| python3-supported-min (>> 3.5)', self.d.depends)
 
     def test_depends_on_py_version_ge_27_packages(self):
         self.assertIn('python3-python-version-ge27',
                       self.d.depends)
 
     def test_depends_on_py_version_ge_35_packages(self):
-        self.assertIn('python3-python-version-ge35 | python3 (<< 3.5)',
-                      self.d.depends)
+        self.assertIn('python3-python-version-ge35 '
+                      '| python3-supported-max (<< 3.5)', self.d.depends)
 
     def test_depends_on_py_version_gt_35_packages(self):
-        self.assertIn('python3-python-version-gt35 | python3 (<< 3.6)',
-                      self.d.depends)
+        self.assertIn('python3-python-version-gt35 '
+                      '| python3-supported-max (<= 3.5)', self.d.depends)
 
     def test_depends_on_py_version_eq_35_packages(self):
-        self.assertIn('python3-python-version-eq35 | python3 (<< 3.5) '
-                      '| python3 (>> 3.6)', self.d.depends)
+        self.assertIn(
+            'python3-python-version-eq35 | python3-supported-max (<< 3.5) '
+            '| python3-supported-min (>= 3.6)', self.d.depends)
 
     def test_depends_on_py_version_ne_35_packages(self):
         # Can't be represented in Debian depends
         self.assertIn('python3-python-version-ne35', self.d.depends)
 
     def test_depends_on_py_version_aeq_35_packages(self):
-        self.assertIn('python3-python-version-aeq35 | python3 (<< 3.5) '
-                      '| python3 (>> 3.6)', self.d.depends)
+        self.assertIn(
+            'python3-python-version-aeq35 | python3-supported-max (<< 3.5) '
+            '| python3-supported-min (>> 3.5)', self.d.depends)
 
     def test_depends_on_py_version_ceq_35_packages(self):
-        self.assertIn('python3-python-version-ceq35 | python3 (<< 3.5) '
-                      '| python3 (>> 3.6)', self.d.depends)
+        self.assertIn(
+            'python3-python-version-ceq35 | python3-supported-max (<< 3.5) '
+            '| python3-supported-min (>= 3.6)', self.d.depends)
 
     def test_depends_on_py_version_weq_35_packages(self):
-        self.assertIn('python3-python-version-weq35 | python3 (<< 3.5) '
-                      '| python3 (>> 3.6)', self.d.depends)
+        self.assertIn(
+            'python3-python-version-weq35 | python3-supported-max (<< 3.5) '
+            '| python3-supported-min (>= 3.6)', self.d.depends)
 
     def test_skips_py_version_full_lt_300_packages(self):
         self.assertNotInDepends('python3-python-version-full-lt300')
 
     def test_depends_on_py_version_full_lt_351_packages(self):
-        self.assertIn('python3-python-version-full-lt351 | python3 (>> 3.5.1)',
-                      self.d.depends)
+        self.assertIn('python3-python-version-full-lt351 '
+                      '| python3-supported-min (>= 3.5.1)', self.d.depends)
 
     def test_depends_on_py_version_full_le_351_packages(self):
-        self.assertIn('python3-python-version-full-le351 | python3 (>> 3.5.2)',
-                      self.d.depends)
+        self.assertIn('python3-python-version-full-le351 '
+                      '| python3-supported-min (>> 3.5.1)', self.d.depends)
 
     def test_depends_on_py_version_full_ge_351_packages(self):
-        self.assertIn('python3-python-version-full-ge351 | python3 (<< 3.5.1)',
-                      self.d.depends)
+        self.assertIn('python3-python-version-full-ge351 '
+                      '| python3-supported-max (<< 3.5.1)', self.d.depends)
 
     def test_depends_on_py_version_full_ge_351a1_packages(self):
         # With full PEP-440 parsing this should be (<< 3.5.1~a1)
-        self.assertIn(
-            'python3-python-version-full-ge351a1 | python3 (<< 3.5.0)',
-            self.d.depends)
+        self.assertIn('python3-python-version-full-ge351a1 '
+                      '| python3-supported-max (<< 3.5.0)', self.d.depends)
 
     def test_depends_on_py_version_full_ge_351b1post1_packages(self):
         # With full PEP-440 parsing this should be (<< 3.5.1~b1.post1)
         self.assertIn('python3-python-version-full-ge351a1 '
-                      '| python3 (<< 3.5.0)',
-                      self.d.depends)
+                      '| python3-supported-max (<< 3.5.0)', self.d.depends)
 
     def test_depends_on_py_version_full_gt_351_packages(self):
-        self.assertIn('python3-python-version-full-gt351 | python3 (<< 3.5.2)',
-                      self.d.depends)
+        self.assertIn('python3-python-version-full-gt351 '
+                      '| python3-supported-max (<= 3.5.1)', self.d.depends)
 
     def test_depends_on_py_version_full_eq_351_packages(self):
-        self.assertIn('python3-python-version-full-eq351 | python3 (<< 3.5.1) '
-                      '| python3 (>> 3.5.2)', self.d.depends)
+        self.assertIn('python3-python-version-full-eq351 '
+                      '| python3-supported-max (<< 3.5.1) '
+                      '| python3-supported-min (>> 3.5.1)', self.d.depends)
 
     def test_depends_on_py_version_full_ne_351_packages(self):
         # Can't be represented in Debian depends
@@ -504,12 +513,14 @@ class TestEnvironmentMarkersDistInfo(DependenciesTestCase):
         self.assertNotInDepends('python3-python-version-full-aeq351')
 
     def test_depends_on_py_version_full_ceq_351_packages(self):
-        self.assertIn('python3-python-version-full-ceq351 | python3 (<< 3.5.1) '
-                      '| python3 (>> 3.6)', self.d.depends)
+        self.assertIn('python3-python-version-full-ceq351 '
+                      '| python3-supported-max (<< 3.5.1) '
+                      '| python3-supported-min (>= 3.6)', self.d.depends)
 
     def test_depends_on_py_version_full_weq_35_packages(self):
-        self.assertIn('python3-python-version-full-weq35 | python3 (<< 3.5) '
-                      '| python3 (>> 3.6)', self.d.depends)
+        self.assertIn('python3-python-version-full-weq35 '
+                      '| python3-supported-max (<< 3.5) '
+                      '| python3-supported-min (>= 3.6)', self.d.depends)
 
     def test_depends_on_sys_cpython_packages(self):
         self.assertIn('python3-implementation-name-cpython', self.d.depends)
@@ -518,11 +529,13 @@ class TestEnvironmentMarkersDistInfo(DependenciesTestCase):
         self.assertIn('python3-implementation-name-pypy', self.d.depends)
 
     def test_depends_on_sys_implementation_lt35_packages(self):
-        self.assertIn('python3-implementation-version-lt35 | python3 (>> 3.5)',
+        self.assertIn('python3-implementation-version-lt35 '
+                      '| python3-supported-min (>= 3.5)',
                       self.d.depends)
 
     def test_depends_on_sys_implementation_ge35_packages(self):
-        self.assertIn('python3-implementation-version-ge35 | python3 (<< 3.5)',
+        self.assertIn('python3-implementation-version-ge35 '
+                      '| python3-supported-max (<< 3.5)',
                       self.d.depends)
 
     def test_ignores_invalid_marker(self):

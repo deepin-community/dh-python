@@ -48,7 +48,7 @@ PYDIST_RE = re.compile(r"""
     (?P<dependency>(?:[a-z][^;]*)?)              # Debian dependency
     (?:  # optional upstream version -> Debian version translator
         ;\s*
-        (?P<standard>PEP386)?                    # PEP-386 mode
+        (?P<standard>PEP386|PEP440)?             # PEP-386 / PEP-440 mode
         \s*
         (?P<rules>(?:s|tr|y).*)?                 # translator rules
     )?
@@ -411,25 +411,34 @@ def check_environment_marker_restrictions(req, marker_str, impl):
         prev_ver[version_parts - 1] -= 1
         prev_ver = '.'.join(str(x) for x in prev_ver)
 
+        # We try to do something somewhat sensible with micro versions
+        # even though we don't currently emit them in python3-supported-min/max
+
         if op == '<':
             if int_ver <= [3, 0, 0]:
                 return False
-            return '| python3 (>> {})'.format(env_ver)
+            return '| python3-supported-min (>= {})'.format(env_ver)
         elif op == '<=':
-            return '| python3 (>> {})'.format(next_ver)
+            return '| python3-supported-min (>> {})'.format(env_ver)
         elif op == '>=':
             if int_ver < [3, 0, 0]:
                 return True
-            return '| python3 (<< {})'.format(env_ver)
+            return '| python3-supported-max (<< {})'.format(env_ver)
         elif op == '>':
             if int_ver < [3, 0, 0]:
                 return True
-            return '| python3 (<< {})'.format(next_ver)
-        elif op in ('==', '==='):
-            # === is arbitrary equality (PEP 440)
-            if marker == 'python_version' or op == '==':
-                return '| python3 (<< {}) | python3 (>> {})'.format(
+            return '| python3-supported-max (<= {})'.format(env_ver)
+        elif op == '==':
+            if marker == 'python_version':
+                return '| python3-supported-max (<< {}) | python3-supported-min (>= {})'.format(
                         env_ver, next_ver)
+            return '| python3-supported-max (<< {}) | python3-supported-min (>> {})'.format(
+                    env_ver, env_ver)
+        elif op == '===':
+            # === is arbitrary equality (PEP 440)
+            if marker == 'python_version':
+                return '| python3-supported-max (<< {}) | python3-supported-min (>> {})'.format(
+                        env_ver, env_ver)
             else:
                 log.info(
                     'Skipping requirement with %s environment marker, cannot '
@@ -439,7 +448,7 @@ def check_environment_marker_restrictions(req, marker_str, impl):
             ceq_next_ver = int_ver[:2]
             ceq_next_ver[1] += 1
             ceq_next_ver = '.'.join(str(x) for x in ceq_next_ver)
-            return '| python3 (<< {}) | python3 (>> {})'.format(
+            return '| python3-supported-max (<< {}) | python3-supported-min (>= {})'.format(
                     env_ver, ceq_next_ver)
         elif op == '!=':
             log.info('Ignoring != comparison in environment marker, cannot '
@@ -588,7 +597,8 @@ def ci_regexp(name):
     return ''.join("[%s%s]" % (i.upper(), i) if i.isalpha() else i for i in name.lower())
 
 
-PRE_VER_RE = re.compile(r'[-.]?(alpha|beta|rc|dev|a|b|c)')
+PEP386_PRE_VER_RE = re.compile(r'[-.]?(alpha|beta|rc|dev|a|b|c)')
+PEP440_PRE_VER_RE = re.compile(r'[-.]?(a|b|rc)')
 GROUP_RE = re.compile(r'\$(\d+)')
 
 
@@ -660,7 +670,9 @@ def _translate(version, rules, standard):
         else:
             log.warn('unknown rule ignored: %s', rule)
     if standard == 'PEP386':
-        version = PRE_VER_RE.sub(r'~\g<1>', version)
+        version = PEP386_PRE_VER_RE.sub(r'~\g<1>', version)
+    elif standard == 'PEP440':
+        version = PEP440_PRE_VER_RE.sub(r'~\g<1>', version)
     return version
 
 

@@ -1,9 +1,92 @@
-dh-python (5.20230130-0deepin1) unstable; urgency=medium
+dh-python (6.20231107) unstable; urgency=medium
 
-  * Non-maintainer upload.
-  * Use tomllib in python3 (>> 3.11)
+  * Correct logic for leaving SOURCES.txt when cleaning egg-info, it was
+    inverted by mistake.
+  * Don't trip over LICENSES directories in .dist-info. (Closes: #1055008)
 
- -- Tianyu Chen <chentianyu1@uniontech.com>  Mon, 13 Mar 2023 14:49:46 +0800
+ -- Stefano Rivera <stefanor@debian.org>  Tue, 07 Nov 2023 17:34:28 +0200
+
+dh-python (6.20231025) unstable; urgency=medium
+
+  * Align detection of nocheck with debhelper, thanks Victor Westerhuis.
+  * Remove more license files from dist-info, thanks Christoph Anton Mitterer.
+  * Clean .tox directories. Previously the code to do this was unreachable.
+    (Closes: #1049950)
+  * Add test-coverage for distutils-extra, missed in 6.20230825.
+  * pybuild: Ignore an exit code of 5, for no tests found, from
+    unittest.discover for now. When we are ready to break packages and fix
+    #1024971, this will change.
+  * Build-Depends: python3-setuptools to avoid FTBFS with
+    Python 3.12 as a supported version.
+  * Also, Depends: python3-setuptools for now, to avoid adding it
+    in other packages.
+  * Don't clean egg-info/SOURCES.txt for packages using setuptools-scm, as
+    they may be depending on it to locate package_data. (Closes: #1052854)
+
+ -- Stefano Rivera <stefanor@debian.org>  Wed, 25 Oct 2023 20:08:06 +0200
+
+dh-python (6.20230825) unstable; urgency=medium
+
+  * Parse .egg-info/PKG-INFO for Requirements. distutils-extra has been using
+    these for a while now. (Closes: #1050305)
+  * Fix some details in python3-supported-min/max generation. Thanks Jochen
+    Sprickerhof for noticing and sending an MR.
+  * Remove *.egg-info directories in clean step, as part of Debian's wider
+    effort to improve clean targets. Thanks Stuart Prescott for the patch.
+  * Explain that setting pybuild.testfiles overrides the defaults in
+    pybuild(1). (Closes: #1042802)
+
+ -- Stefano Rivera <stefanor@debian.org>  Fri, 25 Aug 2023 22:51:08 +0200
+
+dh-python (6.20230813) unstable; urgency=medium
+
+  * When we build a wheel for tox, with the distutils plugin, make sure
+    our .pydistutils.cfg isn't present, so we build it in the standard layout.
+  * Remove RECORD files from dist-info, these are incompatible with
+    multi-arch.
+  * Support for backporting the pyproject plugin to Python < 3.11. Thanks
+    Stuart Prescott. (Closes: #1043301)
+  * Use values for _PYTHON_HOST_PLATFORM that are closer to Python's defaults.
+  * tox: Pass -x testenv.passenv+=_PYTHON_HOST_PLATFORM, so that pip will
+    accept the _PYTHON_HOST_PLATFORM that the test wheel was built with.
+  * Generate dependencies on using python3-supported-min and
+    python3-supported-max.  Allowing dependencies to work correctly on all
+    supported python 3 versions.  (Closes: #1028603)
+  * pybuild-auto-pkgtest: Run tox tests against the installed package.
+
+ -- Stefano Rivera <stefanor@debian.org>  Sun, 13 Aug 2023 00:58:58 +0200
+
+dh-python (6.20230802) unstable; urgency=medium
+
+  * Add pybuild plugin to build meson packages.
+  * Update pydist fallback.
+
+ -- Stefano Rivera <stefanor@debian.org>  Wed, 02 Aug 2023 11:05:40 +0200
+
+dh-python (6.20230603) experimental; urgency=medium
+
+  * Bump major version, post-bookworm.
+
+ -- Stefano Rivera <stefanor@debian.org>  Sat, 03 Jun 2023 10:50:19 -0400
+
+dh-python (5.20230510) experimental; urgency=medium
+
+  * Add support for PEP440 standards-markers in PyDist files (which superseded
+    PEP386 almost a decade ago).
+  * Add support for tox 4. Avoid needing to do an isolated build of the
+    package by using the wheel we built, ourselves. (Closes: #1035675)
+    - Packages using the distutils plugin now need python3-wheel installed.
+      Raise an error explaining that wheel is needed, if it's missing.
+    - Support all 3 potential tox configuration files. (Closes: #1033486)
+  * dh_python3: Write a "debian" INSTALLER file into dist-info directories.
+    (Closes: #1032133)
+  * Use tomllib (available since Python 3.11) instead of tomli.
+    (Closes: #1032866)
+  * Use cachy as an example dependency instead of tomli, in tests.
+  * Add pyproject.toml and pytest.ini to the default testfiles.
+    (Closes: #1031609)
+
+ -- Stefano Rivera <stefanor@debian.org>  Wed, 10 May 2023 19:26:51 -0400
 
 dh-python (5.20230130) unstable; urgency=medium
 

@@ -29,11 +29,6 @@ import os.path as osp
 import shutil
 import sysconfig
 try:
-    import tomli
-except ModuleNotFoundError:
-    # Plugin still works, only needed for autodetection
-    pass
-try:
     from flit.install import Installer
 except ImportError:
     Installer = object
@@ -91,18 +86,6 @@ class DebianInstaller(Installer):
         # Remove direct_url.json - contents are not useful or reproduceable
         for path in Path(dirs['purelib']).glob("*.dist-info/direct_url.json"):
             path.unlink()
-        # Remove build path from RECORD files
-        for path in Path(dirs['purelib']).glob("*.dist-info/RECORD"):
-            with open(path) as f:
-                reader = csv.reader(f)
-                records = list(reader)
-            with open(path, 'w') as f:
-                writer = csv.writer(f)
-                for path, hash_, size in records:
-                    path = path.replace(destdir, '')
-                    if fnmatch(path, "*.dist-info/direct_url.json"):
-                        continue
-                    writer.writerow([path, hash_, size])
 
 
 class BuildSystem(Base):
