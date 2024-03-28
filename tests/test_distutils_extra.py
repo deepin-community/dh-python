@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 
 from dhpython.depends import Dependencies
 
-from test_depends import FakeOptions, prime_pydist
+from .test_depends import FakeOptions, prime_pydist
 
 
 class TestDistutilsExtra(unittest.TestCase):
@@ -34,12 +34,12 @@ class TestDistutilsExtra(unittest.TestCase):
     def test_depends_on_bar(self):
         self.d = Dependencies(self.pkg, self.impl)
         stats = deepcopy(self.stats)
-        self.tempdir = TemporaryDirectory()
+        self.tempdir = TemporaryDirectory()  # pylint: disable=consider-using-with
         self.addCleanup(self.tempdir.cleanup)
         old_wd = os.getcwd()
         os.chdir(self.tempdir.name)
         self.addCleanup(os.chdir, old_wd)
-        with open(self.tempdir.name + '/PKG-INFO', 'w') as f:
+        with open(self.tempdir.name + '/PKG-INFO', 'w', encoding="UTF-8") as f:
             f.write("""Metadata-Version: 2.1
 Name: gTranscribe
 Version: 0.11

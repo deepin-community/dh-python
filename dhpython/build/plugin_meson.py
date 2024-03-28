@@ -30,14 +30,14 @@ class BuildSystem(Base):
 
     @shell_command
     def clean(self, context, args):
-        super(BuildSystem, self).clean(context, args)
+        super().clean(context, args)
         return 'dh_auto_clean --buildsystem=cmake'
 
     @shell_command
     def configure(self, context, args):
         # Can't be specified on the command line, directly
         # https://github.com/mesonbuild/meson/issues/9671
-        with open(join(args['build_dir'], 'pybuild-meson-native.ini'), 'w') as f:
+        with open(join(args['build_dir'], 'pybuild-meson-native.ini'), 'w', encoding="UTF-8") as f:
             f.write('[binaries]\n')
             f.write("python3 = '" + args['interpreter'].binary_dv + "'\n")
 

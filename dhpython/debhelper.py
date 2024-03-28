@@ -27,8 +27,8 @@ from sys import argv
 from dhpython import DEPENDS_SUBSTVARS, PKG_NAME_TPLS, RT_LOCATIONS, RT_TPLS
 
 log = logging.getLogger('dhpython')
-parse_dep = re.compile('''[,\s]*
-    (?P<name>[^ :]+)(?::any)?
+parse_dep = re.compile(r'''[,\s]*
+    (?P<name>[^\s:]+)(?::any)?
     \s*
     \(?(?P<version>([>=<]{2,}|=)\s*[^\)]+)?\)?
     \s*
@@ -58,13 +58,9 @@ class DebHelper:
         self.packages = {}
         self.build_depends = {}
         self.python_version = None
-        # Note that each DebHelper instance supports ONE interpreter type only
-        # it's not possible to mix cpython2, cpython3 and pypy here
         self.impl = impl
         self.command = {
-            'cpython2': 'dh_python2',
             'cpython3': 'dh_python3',
-            'pypy': 'dh_pypy',
         }[impl]
         skip_tpl = set()
         for name, tpls in PKG_NAME_TPLS.items():
@@ -115,11 +111,6 @@ class DebHelper:
             if len(self.python_version.split(',')) > 2:
                 raise ValueError('too many arguments provided for '
                                  'X-Python3-Version: min and max only.')
-        elif self.impl == 'cpython2':
-            if 'x-python-version' in paragraphs[0]:
-                self.python_version = paragraphs[0]['x-python-version']
-            elif 'xs-python-version' in paragraphs[0]:
-                self.python_version = paragraphs[0]['xs-python-version']
 
         build_depends = []
         for field in ('build-depends', 'build-depends-indep',
@@ -167,7 +158,7 @@ class DebHelper:
                 continue
 
             if not binary_package.startswith(PKG_NAME_TPLS[impl]):
-                # package doesn't have common prefix (python-, python3-, pypy-)
+                # package doesn't have common prefix (python3-)
                 # so lets check if Depends/Recommends contains the
                 # appropriate substvar
                 if (substvar not in paragraph.get('depends', '')
@@ -245,9 +236,8 @@ class DebHelper:
                 if new_data:
                     data += '\n# Automatically added by {}'.format(basename(argv[0])) +\
                             '{}\n# End automatically added section\n'.format(new_data)
-                    fp = open(fn, 'w', encoding='utf-8')
-                    fp.write(data)
-                    fp.close()
+                    with open(fn, 'w', encoding='utf-8') as fp:
+                        fp.write(data)
 
     def save_substvars(self):
         for package, settings in self.packages.items():
@@ -282,9 +272,8 @@ class DebHelper:
                     data += "%s=%s\n" % (name, ', '.join(items))
             data = data.replace('\n\n', '\n')
             if data:
-                fp = open(fn, 'w', encoding='utf-8')
-                fp.write(data)
-                fp.close()
+                with open(fn, 'w', encoding='utf-8') as fp:
+                    fp.write(data)
 
     def save_rtupdate(self):
         for package, settings in self.packages.items():
@@ -297,7 +286,8 @@ class DebHelper:
                 makedirs(d)
             fn = "%s/%s.rtupdate" % (d, package)
             if exists(fn):
-                data = open(fn, 'r', encoding='utf-8').read()
+                with open(fn, 'r', encoding='utf-8') as fp:
+                    data = fp.read()
             else:
                 data = "#! /bin/sh\nset -e"
             for dname, args in values:
@@ -307,15 +297,14 @@ class DebHelper:
                 if cmd not in data:
                     data += "\n%s" % cmd
             if data:
-                fp = open(fn, 'w', encoding='utf-8')
-                fp.write(data)
-                fp.close()
+                with open(fn, 'w', encoding='utf-8') as fp:
+                    fp.write(data)
                 chmod(fn, 0o755)
 
     def save_log(self):
         if not self.options.write_log:
             return
-        for package, settings in self.packages.items():
+        for package, _ in self.packages.items():
             with open('debian/{}.debhelper.log'.format(package),
                       'a', encoding='utf-8') as f:
                 f.write(self.command + '\n')
