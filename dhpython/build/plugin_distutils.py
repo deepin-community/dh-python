@@ -63,8 +63,7 @@ def create_pydistutils_cfg(func):
 class BuildSystem(Base):
     DESCRIPTION = 'Distutils build system'
     SUPPORTED_INTERPRETERS = {'python', 'python3', 'python{version}',
-                              'python-dbg', 'python3-dbg', 'python{version}-dbg',
-                              'pypy'}
+                              'python-dbg', 'python3-dbg', 'python{version}-dbg'}
     REQUIRED_FILES = [_setup_tpl]
     OPTIONAL_FILES = {'setup.cfg': 1,
                       'requirements.txt': 1,
@@ -73,7 +72,7 @@ class BuildSystem(Base):
     CLEAN_FILES = Base.CLEAN_FILES | {'build'}
 
     def detect(self, context):
-        result = super(BuildSystem, self).detect(context)
+        result = super().detect(context)
         if _setup_tpl in self.DETECTED_REQUIRED_FILES:
             context['args']['setup_py'] = self.DETECTED_REQUIRED_FILES[_setup_tpl][0]
         else:
@@ -83,7 +82,7 @@ class BuildSystem(Base):
     @shell_command
     @create_pydistutils_cfg
     def clean(self, context, args):
-        super(BuildSystem, self).clean(context, args)
+        super().clean(context, args)
         if exists(args['interpreter'].binary()):
             return '{interpreter} {setup_py} clean {args}'
         return 0  # no need to invoke anything
@@ -100,7 +99,9 @@ class BuildSystem(Base):
 
     @shell_command
     def _bdist_wheel(self, context, args):
+        # pylint: disable=unused-argument
         try:
+            # pylint: disable=unused-import
             import wheel
         except ImportError:
             raise Exception("wheel is required to build wheels for distutils/setuptools packages. Build-Depend on python3-wheel.")
@@ -124,7 +125,10 @@ class BuildSystem(Base):
         # remove egg-info dirs from build_dir
         for fname in glob1(args['build_dir'], '*.egg-info'):
             fpath = join(args['build_dir'], fname)
-            rmtree(fpath) if isdir(fpath) else remove(fpath)
+            if isdir(fpath):
+                rmtree(fpath)
+            else:
+                remove(fpath)
 
         return '{interpreter.binary_dv} {setup_py} install --root {destdir} {args}'
 
@@ -138,4 +142,4 @@ class BuildSystem(Base):
                 if fp.read().find(b'test_suite') > 0:
                     # TODO: is that enough to detect if test target is available?
                     return '{interpreter} {setup_py} test {args}'
-        return super(BuildSystem, self).test(context, args)
+        return super().test(context, args)

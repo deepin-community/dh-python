@@ -1,6 +1,12 @@
 default:
   image: debian:unstable
 
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_TAG
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 tests:
   before_script:
   - apt-get update
@@ -12,3 +18,11 @@ tests:
   - export DH_PYTHON_DIST=$PWD/pydist
   - ./debian/tests/dh-python
   - ./debian/tests/pybuild
+
+style:
+  before_script:
+  - apt-get update
+  - apt-get -y install --no-install-recommends pylint
+
+  script:
+  - pylint dhpython dh_python3 pybuild

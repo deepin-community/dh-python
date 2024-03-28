@@ -13,50 +13,6 @@ class TestInterpreter(unittest.TestCase):
         if self._triplet:
             environ['DEB_HOST_MULTIARCH'] = self._triplet
 
-    @unittest.skipUnless(exists('/usr/bin/pypy'), 'pypy is not installed')
-    def test_pypy(self):
-        sorted(Interpreter.parse('pypy').items()) == \
-            [('debug', None), ('name', 'pypy'), ('options', ()), ('path', ''), ('version', None)]
-        sorted(Interpreter.parse('#! /usr/bin/pypy --foo').items()) == \
-            [('debug', None), ('name', 'pypy'), ('options', ('--foo',)), ('path', '/usr/bin/'), ('version', None)]
-        Interpreter('pypy').sitedir(version='2.0') == '/usr/lib/pypy/dist-packages/'
-
-    @unittest.skipUnless(exists('/usr/bin/python2.6'), 'python2.6 is not installed')
-    def test_python26(self):
-        i = Interpreter('python2.6')
-        self.assertEqual(i.soabi(), '')
-        self.assertIsNone(i.check_extname('foo.so'))
-        self.assertIsNone(i.check_extname('foo.abi3.so'))
-        self.assertIsNone(i.check_extname('foo/bar/bazmodule.so'))
-
-    @unittest.skipUnless(exists('/usr/bin/python2.6-dbg'), 'python2.6-dbg is not installed')
-    def test_python26dbg(self):
-        i = Interpreter('python2.6-dbg')
-        self.assertEqual(i.soabi(), '')
-        self.assertIsNone(i.check_extname('foo_d.so'))
-        self.assertEqual(i.check_extname('foo.so'), 'foo_d.so')
-        self.assertEqual(i.check_extname('foo/bar/bazmodule.so'), 'foo/bar/bazmodule_d.so')
-
-    @unittest.skipUnless(exists('/usr/bin/python2.7'), 'python2.7 is not installed')
-    def test_python27(self):
-        i = Interpreter('python2.7')
-        self.assertEqual(i.soabi(), '')
-        self.assertEqual(i.check_extname('foo.so'), 'foo.MYARCH.so')
-        self.assertIsNone(i.check_extname('foo.MYARCH_d.so'))
-        self.assertIsNone(i.check_extname('foo.abi3.so'))
-        self.assertIsNone(i.check_extname('foo.OTHER.so'))  # different architecture
-        self.assertEqual(i.check_extname('foo/bar/bazmodule.so'), 'foo/bar/baz.MYARCH.so')
-
-    @unittest.skipUnless(exists('/usr/bin/python2.7-dbg'), 'python2.7-dbg is not installed')
-    def test_python27dbg(self):
-        i = Interpreter('python2.7-dbg')
-        self.assertEqual(i.soabi(), '')
-        self.assertEqual(i.check_extname('foo.so'), 'foo.MYARCH_d.so')
-        self.assertEqual(i.check_extname('foo_d.so'), 'foo.MYARCH_d.so')
-        self.assertIsNone(i.check_extname('foo.MYARCH_d.so'))
-        self.assertIsNone(i.check_extname('foo.OTHER_d.so'))  # different architecture
-        self.assertEqual(i.check_extname('foo/bar/bazmodule.so'), 'foo/bar/baz.MYARCH_d.so')
-
     @unittest.skipUnless(exists('/usr/bin/python3.1'), 'python3.1 is not installed')
     def test_python31(self):
         i = Interpreter('python3.1')
@@ -240,11 +196,6 @@ class TestInterpreter(unittest.TestCase):
         self.assertIsNone(i.check_extname('foo.abi3.so'))
         self.assertEqual(i.check_extname('foo/bar/bazmodule.so'), r'foo/bar/baz.cpython-310d-MYARCH.so')
 
-
-    def test_version(self):
-        i = Interpreter(impl='cpython2')
-        self.assertEqual(str(i), 'python')
-        self.assertEqual(i.binary('2.7'), '/usr/bin/python2.7')
 
 if __name__ == '__main__':
     unittest.main()
