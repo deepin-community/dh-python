@@ -24,9 +24,9 @@ import logging
 import platform
 import os
 import re
+import subprocess
 from functools import partial
 from os.path import exists, isdir, join
-from subprocess import PIPE, Popen
 
 if __name__ == '__main__':
     import sys
@@ -127,7 +127,7 @@ def validate(fpath):
 def load(impl):
     """Load information about installed Python distributions.
 
-    :param impl: interpreter implementation, f.e. cpython2, cpython3, pypy
+    :param impl: interpreter implementation, f.e. cpython3
     :type impl: str
     """
     fname = PYDIST_OVERRIDES_FNAMES.get(impl)
@@ -176,7 +176,7 @@ def guess_dependency(impl, req, version=None, bdep=None,
         version = Version(version)
 
     # some upstreams have weird ideas for distribution name...
-    name, rest = re.compile('([^!><=~ \(\)\[;]+)(.*)').match(req).groups()
+    name, rest = re.compile(r'([^!><=~ \(\)\[;]+)(.*)').match(req).groups()
     # TODO: check stdlib and dist-packaged for name.py and name.so files
     req = safe_name(name) + rest
 
@@ -275,13 +275,13 @@ def guess_dependency(impl, req, version=None, bdep=None,
     dpkg_query = dpkg_query_tpl.format(ci_regexp(safe_name(name)))
 
     log.debug("invoking dpkg -S %s", dpkg_query)
-    process = Popen(('/usr/bin/dpkg', '-S', dpkg_query),
-                    stdout=PIPE, stderr=PIPE)
-    stdout, stderr = process.communicate()
+    process = subprocess.run(
+        ('/usr/bin/dpkg', '-S', dpkg_query),
+        check=False, encoding="UTF-8", capture_output=True,
+    )
     if process.returncode == 0:
         result = set()
-        stdout = str(stdout, 'utf-8')
-        for line in stdout.split('\n'):
+        for line in process.stdout.split('\n'):
             if not line.strip():
                 continue
             pkg, path = line.split(':', 1)
@@ -296,7 +296,7 @@ def guess_dependency(impl, req, version=None, bdep=None,
             log.debug('dependency: found a result with dpkg -S')
             return result.pop() + env_marker_alts
     else:
-        log.debug('dpkg -S did not find package for %s: %s', name, stderr)
+        log.debug('dpkg -S did not find package for %s: %s', name, process.stderr)
 
     pname = sensible_pname(impl, name)
     log.info('Cannot find package that provides %s. '
@@ -417,28 +417,25 @@ def check_environment_marker_restrictions(req, marker_str, impl):
         if op == '<':
             if int_ver <= [3, 0, 0]:
                 return False
-            return '| python3-supported-min (>= {})'.format(env_ver)
+            return f'| python3-supported-min (>= {env_ver})'
         elif op == '<=':
-            return '| python3-supported-min (>> {})'.format(env_ver)
+            return f'| python3-supported-min (>> {env_ver})'
         elif op == '>=':
             if int_ver < [3, 0, 0]:
                 return True
-            return '| python3-supported-max (<< {})'.format(env_ver)
+            return f'| python3-supported-max (<< {env_ver})'
         elif op == '>':
             if int_ver < [3, 0, 0]:
                 return True
-            return '| python3-supported-max (<= {})'.format(env_ver)
+            return f'| python3-supported-max (<= {env_ver})'
         elif op == '==':
             if marker == 'python_version':
-                return '| python3-supported-max (<< {}) | python3-supported-min (>= {})'.format(
-                        env_ver, next_ver)
-            return '| python3-supported-max (<< {}) | python3-supported-min (>> {})'.format(
-                    env_ver, env_ver)
+                return f'| python3-supported-max (<< {env_ver}) | python3-supported-min (>= {next_ver})'
+            return f'| python3-supported-max (<< {env_ver}) | python3-supported-min (>> {env_ver})'
         elif op == '===':
             # === is arbitrary equality (PEP 440)
             if marker == 'python_version':
-                return '| python3-supported-max (<< {}) | python3-supported-min (>> {})'.format(
-                        env_ver, env_ver)
+                return f'| python3-supported-max (<< {env_ver}) | python3-supported-min (>> {env_ver})'
             else:
                 log.info(
                     'Skipping requirement with %s environment marker, cannot '
@@ -448,8 +445,7 @@ def check_environment_marker_restrictions(req, marker_str, impl):
             ceq_next_ver = int_ver[:2]
             ceq_next_ver[1] += 1
             ceq_next_ver = '.'.join(str(x) for x in ceq_next_ver)
-            return '| python3-supported-max (<< {}) | python3-supported-min (>= {})'.format(
-                    env_ver, ceq_next_ver)
+            return f'| python3-supported-max (<< {env_ver}) | python3-supported-min (>= {ceq_next_ver})'
         elif op == '!=':
             log.info('Ignoring != comparison in environment marker, cannot '
                      'model in Debian deps: %s', req)
@@ -603,7 +599,7 @@ GROUP_RE = re.compile(r'\$(\d+)')
 
 
 def _pl2py(pattern):
-    """Convert Perl RE patterns used in uscan to Python's
+    r"""Convert Perl RE patterns used in uscan to Python's
 
     >>> print(_pl2py('foo$3'))
     foo\g<3>
@@ -668,7 +664,7 @@ def _translate(version, rules, standard):
                     pattern = re.compile(tmp[0], re.I)
             version = pattern.sub(_pl2py(tmp[1]), version, count)
         else:
-            log.warn('unknown rule ignored: %s', rule)
+            log.warning('unknown rule ignored: %s', rule)
     if standard == 'PEP386':
         version = PEP386_PRE_VER_RE.sub(r'~\g<1>', version)
     elif standard == 'PEP440':

@@ -41,37 +41,22 @@ else:
         'http://ftp.debian.org/debian/dists/unstable/main/Contents-amd64.gz',
     ]
 
-IGNORED_PKGS = {'python-setuptools', 'python3-setuptools', 'pypy-setuptools'}
+IGNORED_PKGS = {'python3-setuptools'}
 OVERRIDES = {
-    'cpython2': {
-        'python': 'python',
-        'setuptools': 'python-pkg-resources',
-        'wsgiref': 'python (>= 2.5) | python-wsgiref',
-        'argparse': 'python (>= 2.7) | python-argparse',
-        # not recognized due to .pth file (egg-info is in PIL/ and not in *-packages/)
-        'pil': 'python-pil',
-        'Pillow': 'python-pil'},
     'cpython3': {
+        'Cython': 'cython3',
         'pil': 'python3-pil',
         'Pillow': 'python3-pil',
         'pylint': 'pylint',
         'setuptools': 'python3-pkg-resources',
         'argparse': 'python3 (>= 3.2)'},
-    'pypy': {}
 }
 
 public_egg = re.compile(r'''
     /usr/
     (
-        (?P<cpython2>
-            (lib/python2\.[0-9]/((site)|(dist))-packages)|
-            (share/python-support/[^/]+)
-        )|
         (?P<cpython3>
             (lib/python3/dist-packages)
-        )|
-        (?P<pypy>
-            (lib/pypy/dist-packages)
         )
     )
     /[^/]*\.(dist|egg)-info

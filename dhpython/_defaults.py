@@ -26,20 +26,19 @@ from os.path import exists
 from subprocess import Popen, PIPE
 
 SUPPORTED = {
-    'cpython2': [(2, 7)],
     'cpython3': [(3, 8)],
-    'pypy': [(4, 0)]}
+}
 DEFAULT = {
-    'cpython2': (2, 7),
     'cpython3': (3, 8),
-    'pypy': (4, 0)}
+}
 
 log = logging.getLogger('dhpython')
 
 
 def cpython_versions(major):
     result = [None, None]
-    ver = '' if major == 2 else '3'
+    assert major > 2
+    ver = str(major)
     supported = environ.get("DEBPYTHON{}_SUPPORTED".format(ver))
     default = environ.get("DEBPYTHON{}_DEFAULT".format(ver))
     if not supported or not default:
@@ -54,13 +53,13 @@ def cpython_versions(major):
         try:
             result[0] = tuple(int(i) for i in default.split('.'))
         except Exception as err:
-            log.warn('invalid debian_defaults file: %s', err)
+            log.warning('invalid debian_defaults file: %s', err)
     if supported:
         try:
             result[1] = tuple(tuple(int(j) for j in i.strip().split('.'))
                               for i in supported.split(','))
         except Exception as err:
-            log.warn('invalid debian_defaults file: %s', err)
+            log.warning('invalid debian_defaults file: %s', err)
     return result
 
 
@@ -69,31 +68,25 @@ def from_file(fpath):
         raise ValueError("missing interpreter: %s" % fpath)
     command = "{} --version".format(fpath)
     with Popen(command, shell=True, stdout=PIPE) as process:
-        stdout, stderr = process.communicate()
+        stdout, _ = process.communicate()
         stdout = str(stdout, 'utf-8')
 
     print(stdout)
 
 
-cpython2 = cpython_versions(2)
 cpython3 = cpython_versions(3)
-if cpython2[0]:
-    DEFAULT['cpython2'] = cpython2[0]
 if cpython3[0]:
     DEFAULT['cpython3'] = cpython3[0]
-if cpython2[1]:
-    SUPPORTED['cpython2'] = cpython2[1]
 if cpython3[1]:
     SUPPORTED['cpython3'] = cpython3[1]
-#from_file('/usr/bin/pypy')
 
 
 if __name__ == '__main__':
-    from sys import argv, stderr
-    if len(argv) != 3:
-        print('invalid number of arguments', file=stderr)
-        exit(1)
-    if argv[1] == 'default':
-        print('.'.join(str(i) for i in DEFAULT[argv[2]]))
-    elif argv[1] == 'supported':
-        print(','.join(('.'.join(str(i) for i in v) for v in SUPPORTED[argv[2]])))
+    import sys
+    if len(sys.argv) != 3:
+        print('invalid number of arguments', file=sys.stderr)
+        sys.exit(1)
+    if sys.argv[1] == 'default':
+        print('.'.join(str(i) for i in DEFAULT[sys.argv[2]]))
+    elif sys.argv[1] == 'supported':
+        print(','.join(('.'.join(str(i) for i in v) for v in SUPPORTED[sys.argv[2]])))

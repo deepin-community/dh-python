@@ -22,7 +22,6 @@
 import logging
 import os
 import re
-import locale
 from datetime import datetime
 from glob import glob
 from pickle import dumps
@@ -69,9 +68,9 @@ def move_file(fpath, dstdir):
 
 
 def move_matching_files(src, dst, pattern, sub=None, repl=''):
-    """Move files (preserving path) that match given pattern.
+    r"""Move files (preserving path) that match given pattern.
 
-    move_matching_files('foo/bar/', 'foo/baz/', 'spam/.*\.so$')
+    move_matching_files('foo/bar/', 'foo/baz/', r'spam/.*\.so$')
     will move foo/bar/a/b/c/spam/file.so to foo/baz/a/b/c/spam/file.so
 
     :param sub: regular expression for path part that will be replaced with `repl`
@@ -81,7 +80,7 @@ def move_matching_files(src, dst, pattern, sub=None, repl=''):
     if sub:
         sub = re.compile(sub).sub
         repl = repl or ''
-    for root, dirs, filenames in os.walk(src):
+    for root, _, filenames in os.walk(src):
         for fn in filenames:
             spath = join(root, fn)
             if match(spath):
@@ -134,11 +133,10 @@ def so2pyver(fpath):
     """
 
     cmd = "readelf -Wd '%s'" % fpath
-    process = Popen(cmd, stdout=PIPE, shell=True)
-    encoding = locale.getdefaultlocale()[1] or 'utf-8'
-    match = SHAREDLIB_RE.search(str(process.stdout.read(), encoding=encoding))
-    if match:
-        return Version(match.groups()[0])
+    with Popen(cmd, stdout=PIPE, shell=True) as process:
+        match = SHAREDLIB_RE.search(str(process.stdout.read(), encoding="UTF-8"))
+        if match:
+            return Version(match.groups()[0])
 
 
 def clean_egg_name(name):
@@ -223,6 +221,7 @@ def execute(command, cwd=None, env=None, log_output=None, shell=True):
     elif log_output:
         if isinstance(log_output, str):
             close = True
+            # pylint: disable=consider-using-with
             log_output = open(log_output, 'a', encoding='utf-8')
         log_output.write('\n# command executed on {}'.format(datetime.now().isoformat()))
         log_output.write('\n$ {}\n'.format(command))
@@ -232,10 +231,13 @@ def execute(command, cwd=None, env=None, log_output=None, shell=True):
     log.debug('invoking: %s', command)
     with Popen(command, **args) as process:
         stdout, stderr = process.communicate()
-        close and log_output.close()
-        return dict(returncode=process.returncode,
-                    stdout=stdout and str(stdout, 'utf-8'),
-                    stderr=stderr and str(stderr, 'utf-8'))
+        if close:
+            log_output.close()
+        return {
+            "returncode": process.returncode,
+            "stdout": stdout is not None and str(stdout, 'utf-8'),
+            "stderr": stderr is not None and str(stderr, 'utf-8'),
+        }
 
 
 class memoize:
@@ -250,6 +252,18 @@ class memoize:
         return self.cache[key]
 
 
+@memoize
+def dpkg_architecture():
+    """Parse dpkg-architecture output"""
+    arch_data = {}
+    if exists('/usr/bin/dpkg-architecture'):
+        res = execute('/usr/bin/dpkg-architecture')
+        for line in res['stdout'].splitlines():
+            key, value = line.strip().split('=', 1)
+            arch_data[key] = value
+    return arch_data
+
+
 def pyinstall(interpreter, package, vrange):
     """Install local files listed in pkg.pyinstall files as public modules."""
     srcfpath = "./debian/%s.pyinstall" % package
@@ -258,39 +272,40 @@ def pyinstall(interpreter, package, vrange):
     impl = interpreter.impl
     versions = get_requested_versions(impl, vrange)
 
-    for line in open(srcfpath, encoding='utf-8'):
-        if not line or line.startswith('#'):
-            continue
-        details = INSTALL_RE.match(line)
-        if not details:
-            raise ValueError("unrecognized line: %s" % line)
-        details = details.groupdict()
-        if details['module']:
-            details['module'] = details['module'].replace('.', '/')
-        myvers = versions & get_requested_versions(impl, details['vrange'])
-        if not myvers:
-            log.debug('%s.pyinstall: no matching versions for line %s',
-                      package, line)
-            continue
-        files = glob(details['pattern'])
-        if not files:
-            raise ValueError("missing file(s): %s" % details['pattern'])
-        for fpath in files:
-            fpath = fpath.lstrip('/.')
+    with open(srcfpath, encoding='utf-8') as fp:
+        for line in fp:
+            if not line or line.startswith('#'):
+                continue
+            details = INSTALL_RE.match(line)
+            if not details:
+                raise ValueError("unrecognized line: %s" % line)
+            details = details.groupdict()
             if details['module']:
-                dstname = join(details['module'], split(fpath)[1])
-            elif fpath.startswith('debian/'):
-                dstname = fpath[7:]
-            else:
-                dstname = fpath
-            for version in myvers:
-                dstfpath = join(interpreter.sitedir(package, version), dstname)
-                dstdir = split(dstfpath)[0]
-                if not exists(dstdir):
-                    os.makedirs(dstdir)
-                if exists(dstfpath):
-                    os.remove(dstfpath)
-                os.link(fpath, dstfpath)
+                details['module'] = details['module'].replace('.', '/')
+            myvers = versions & get_requested_versions(impl, details['vrange'])
+            if not myvers:
+                log.debug('%s.pyinstall: no matching versions for line %s',
+                        package, line)
+                continue
+            files = glob(details['pattern'])
+            if not files:
+                raise ValueError("missing file(s): %s" % details['pattern'])
+            for fpath in files:
+                fpath = fpath.lstrip('/.')
+                if details['module']:
+                    dstname = join(details['module'], split(fpath)[1])
+                elif fpath.startswith('debian/'):
+                    dstname = fpath[7:]
+                else:
+                    dstname = fpath
+                for version in myvers:
+                    dstfpath = join(interpreter.sitedir(package, version), dstname)
+                    dstdir = split(dstfpath)[0]
+                    if not exists(dstdir):
+                        os.makedirs(dstdir)
+                    if exists(dstfpath):
+                        os.remove(dstfpath)
+                    os.link(fpath, dstfpath)
 
 
 def pyremove(interpreter, package, vrange):
@@ -301,27 +316,28 @@ def pyremove(interpreter, package, vrange):
     impl = interpreter.impl
     versions = get_requested_versions(impl, vrange)
 
-    for line in open(srcfpath, encoding='utf-8'):
-        if not line or line.startswith('#'):
-            continue
-        details = REMOVE_RE.match(line)
-        if not details:
-            raise ValueError("unrecognized line: %s: %s" % (package, line))
-        details = details.groupdict()
-        myvers = versions & get_requested_versions(impl, details['vrange'])
-        if not myvers:
-            log.debug('%s.pyremove: no matching versions for line %s',
-                      package, line)
-        for version in myvers:
-            site_dirs = interpreter.old_sitedirs(package, version)
-            site_dirs.append(interpreter.sitedir(package, version))
-            for sdir in site_dirs:
-                files = glob(sdir + '/' + details['pattern'])
-                for fpath in files:
-                    if isdir(fpath):
-                        rmtree(fpath)
-                    else:
-                        os.remove(fpath)
+    with open(srcfpath, encoding='utf-8') as fp:
+        for line in fp:
+            if not line or line.startswith('#'):
+                continue
+            details = REMOVE_RE.match(line)
+            if not details:
+                raise ValueError("unrecognized line: %s: %s" % (package, line))
+            details = details.groupdict()
+            myvers = versions & get_requested_versions(impl, details['vrange'])
+            if not myvers:
+                log.debug('%s.pyremove: no matching versions for line %s',
+                        package, line)
+            for version in myvers:
+                site_dirs = interpreter.old_sitedirs(package, version)
+                site_dirs.append(interpreter.sitedir(package, version))
+                for sdir in site_dirs:
+                    files = glob(sdir + '/' + details['pattern'])
+                    for fpath in files:
+                        if isdir(fpath):
+                            rmtree(fpath)
+                        else:
+                            os.remove(fpath)
 
 from dhpython.interpreter import Interpreter
 from dhpython.version import Version, get_requested_versions, RANGE_PATTERN

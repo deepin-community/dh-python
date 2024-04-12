@@ -1,3 +1,63 @@
+dh-python (6.20240401) unstable; urgency=medium
+
+  [ Stefano Rivera ]
+  * Remove python3-distutils from dh-python Depends. It doesn't exist as a
+    package for 3.12, and is provided as a compatibility shim by setuptools.
+    (Closes: #1066833)
+  * Add support for testing with stestr. Thanks James Page for the patch.
+    (Closes: #883004)
+
+  [ Julian Gilbey ]
+  * Add python3-flit-scm to list of build-dependencies requiring
+    SETUPTOOLS_SCM_PRETEND_VERSION (Closes: #1067822)
+
+ -- Stefano Rivera <stefanor@debian.org>  Mon, 01 Apr 2024 13:23:32 -0400
+
+dh-python (6.20240310) unstable; urgency=medium
+
+  [ Jérémy Lal ]
+  * Fix pydist path in dh_python3 doc
+
+  [ Louis-Philippe Véronneau ]
+  * automatically set env var for python3-poetry-dynamic-versioning
+
+  [ Niels Thykier ]
+  * Remove trivially removable code related to cpython << 3.11. This includes
+    some cpython2 code.
+
+  [ Stefano Rivera ]
+  * Remove hard-coded 3.11 from tests. (Closes: #1064963)
+  * Remove flit plugin, replaced by pyproject. (Closes: #1061309)
+  * Drop support for PyPy (2.7), long removed from the archive.
+  * Improve test cleaning.
+
+ -- Stefano Rivera <stefanor@debian.org>  Sun, 10 Mar 2024 11:41:23 -0400
+
+dh-python (6.20231223) unstable; urgency=medium
+
+  [ Stefano Rivera ]
+  * When building PEP-517 packages with the mesonpy backend, pass the same
+    options to meson as debhelper would, when building meson packages itself.
+    (Closes: #1041692)
+  * Handle tab-prefixed debian/control lines in dhpython/debhelper.py,
+    correctly. Strip the tab rather than including it in a package name.
+
+  [ Piotr Ożarowski ]
+  * pydist fallback: add Cython override to point to cython3 package
+
+ -- Stefano Rivera <stefanor@debian.org>  Sat, 23 Dec 2023 20:06:52 -0400
+
+dh-python (6.20231204) unstable; urgency=medium
+
+  * dh_python3: Fix file filtering bug that left dot-directories in binary
+    packages. (Closes: #1056291)
+  * Remove dot-files from dist-packages. (See: #1057432)
+  * Fix a bug in merging dist-info directories that left INSTALLER files in
+    /usr/lib/python3.12/dist-packages.
+  * Update pydist fallback.
+
+ -- Stefano Rivera <stefanor@debian.org>  Mon, 04 Dec 2023 21:08:55 -0400
+
 dh-python (6.20231107) unstable; urgency=medium
 
   * Correct logic for leaving SOURCES.txt when cleaning egg-info, it was

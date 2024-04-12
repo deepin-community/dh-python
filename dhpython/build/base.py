@@ -24,19 +24,11 @@ from glob import glob1
 from os import remove, walk
 from os.path import exists, isdir, join
 from pathlib import Path
-from subprocess import Popen, PIPE
-from shutil import rmtree, copyfile, copytree
+from shlex import quote
+from shutil import rmtree, copyfile, copytree, which
 from dhpython.debhelper import DebHelper, build_options
 from dhpython.exceptions import RequiredCommandMissingException
 from dhpython.tools import execute
-try:
-    from shlex import quote
-except ImportError:
-    # shlex.quote is new in Python 3.3
-    def quote(s):
-        if not s:
-            return "''"
-        return "'" + s.replace("'", "'\"'\"'") + "'"
 
 log = logging.getLogger('dhpython')
 
@@ -80,7 +72,7 @@ def copy_test_files(dest='{build_dir}',
                        and name in add_to_args:
                         args['args'] = name
             if files_to_remove and filelist:
-                with open(filelist.format(**args), 'a') as fp:
+                with open(filelist.format(**args), 'a', encoding="UTF-8") as fp:
                     fp.writelines(files_to_remove)
 
             return func(self, context, args, *oargs, **kwargs)
@@ -120,9 +112,8 @@ class Base:
     @classmethod
     def is_usable(cls):
         for command in cls.REQUIRED_COMMANDS:
-            process = Popen(['which', command], stdout=PIPE, stderr=PIPE)
-            out, err = process.communicate()
-            if process.returncode != 0:
+            pth = which(command)
+            if not pth:
                 raise RequiredCommandMissingException(command)
 
     def detect(self, context):
@@ -190,7 +181,7 @@ class Base:
         ).intersection(set(dh.build_depends))
 
         for root, dirs, file_names in walk(context['dir']):
-            for name in dirs:
+            for name in dirs[:]:
                 if name == '__pycache__' or (
                         clean_sources_txt and name.endswith('.egg-info')):
                     dpath = join(root, name)
@@ -261,7 +252,10 @@ class Base:
             # --installpkg was added in tox 4. Keep tox 3 support for now,
             # for backportability
             r = execute(['tox', '--version', '--quiet'], shell=False)
-            major_version = int(r['stdout'].split('.', 1)[0])
+            try:
+                major_version = int(r['stdout'].split('.', 1)[0])
+            except ValueError as err:
+                raise Exception(f"tox was installed but broken: stdout='{r['stdout']}', stderr='{r['stderr']}'") from err
             if major_version < 4:
                 # tox will call pip to install the module. Let it install the
                 # module inside the virtualenv
@@ -279,9 +273,15 @@ class Base:
 
             tox_cmd.append('{args}')
             return ' '.join(tox_cmd)
+        elif self.cfg.test_stestr:
+            return (
+                'cd {build_dir};'
+                'stestr --config {dir}/.stestr.conf init;'
+                'PYTHON=python{version} stestr --config {dir}/.stestr.conf run'
+            )
         elif self.cfg.test_custom:
             return 'cd {build_dir}; {args}'
-        elif args['version'] == '2.7' or args['version'] >> '3.1' or args['interpreter'] == 'pypy':
+        else:
             # Temporary: Until Python 3.12 is established, and packages without
             # test suites have explicitly disabled tests.
             args['ignore_no_tests'] = True
@@ -292,11 +292,12 @@ class Base:
 
     def built_wheel(self, context, args):
         """Return the path to any built wheels we can find"""
+        # pylint: disable=unused-argument
         wheels = list(Path(args['home_dir']).glob('*.whl'))
         n_wheels = len(wheels)
         if n_wheels > 1:
             raise Exception(f"Expecting to have built exactly 1 wheel, but found {n_wheels}")
-        elif n_wheels == 1:
+        if n_wheels == 1:
             return str(wheels[0])
         return None
 
@@ -311,6 +312,7 @@ class Base:
         return execute(command, context['dir'], env, log_file)
 
     def print_args(self, context, args):
+        # pylint: disable=unused-argument
         cfg = self.cfg
         if len(cfg.print_args) == 1 and len(cfg.interpreter) == 1 and '{version}' not in cfg.interpreter[0]:
             i = cfg.print_args[0]
@@ -336,7 +338,7 @@ def shell_command(func):
             if isinstance(command, int):  # final result
                 return command
         if not command:
-            log.warn('missing command '
+            log.warning('missing command '
                      '(plugin=%s, method=%s, interpreter=%s, version=%s)',
                      self.NAME, func.__name__,
                      args.get('interpreter'), args.get('version'))

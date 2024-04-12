@@ -15,7 +15,7 @@ class DebHelperTestCase(unittest.TestCase):
         return build_options(**self.options)
 
     def setUp(self):
-        self.tempdir = TemporaryDirectory()
+        self.tempdir = TemporaryDirectory()  # pylint: disable=consider-using-with
         self.addCleanup(self.tempdir.cleanup)
 
         old_wd = os.getcwd()
@@ -23,7 +23,7 @@ class DebHelperTestCase(unittest.TestCase):
         self.addCleanup(os.chdir, old_wd)
 
         os.mkdir('debian')
-        with open('debian/control', 'w') as f:
+        with open('debian/control', 'w', encoding="UTF-8") as f:
             f.write('\n'.join(self.control))
         if self.parse_control:
             self.dh = DebHelper(self.build_options(), impl=self.impl)
@@ -32,8 +32,8 @@ class DebHelperTestCase(unittest.TestCase):
 CONTROL = [
     'Source: foo-src',
     'Build-Depends: python3-all,',
-    ' python-all,',
-    ' bar (<< 2) [amd64],',
+    ' python-all',
+    '\t, bar (<< 2) [amd64],',
     ' baz (>= 1.0)',
     'X-Python3-Version: >= 3.1, << 3.10',
     '',
@@ -133,15 +133,6 @@ class TestControlSkipSinglePkg(DebHelperTestCase):
         self.assertEqual(list(self.dh.packages.keys()),
                          ['python3-foo-ext', 'foo', 'recfoo'])
 
-
-class TestControlBlockParsingPy2(DebHelperTestCase):
-    control = CONTROL
-    impl = 'cpython2'
-
-    def test_parses_packages(self):
-        self.assertEqual(list(self.dh.packages.keys()), ['python-foo'])
-
-
 class TestControlNoBinaryPackages(DebHelperTestCase):
     control = [
         'Source: foo-src',
@@ -151,7 +142,7 @@ class TestControlNoBinaryPackages(DebHelperTestCase):
     parse_control = False
 
     def test_throws_error(self):
-        msg = ('Unable to parse debian/control, found less than 2 paragraphs')
+        msg = 'Unable to parse debian/control, found less than 2 paragraphs'
         with self.assertRaisesRegex(Exception, msg):
             DebHelper(self.build_options())
 
@@ -181,9 +172,9 @@ class TestRemainingPackages(DebHelperTestCase):
 
     def setUp(self):
         super().setUp()
-        with open('debian/python3-foo.debhelper.log', 'w') as f:
+        with open('debian/python3-foo.debhelper.log', 'w', encoding="UTF-8") as f:
             f.write('dh_python3\n')
-        with open('debian/python3-foo-ext.debhelper.log', 'w') as f:
+        with open('debian/python3-foo-ext.debhelper.log', 'w', encoding="UTF-") as f:
             f.write('dh_foobar\n')
         self.dh = DebHelper(self.build_options(), impl=self.impl)
 

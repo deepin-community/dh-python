@@ -127,7 +127,7 @@ sub pybuild_commands {
 		# Without this, setuptools-scm tries to detect current
 		# version from git tag, which fails for debian tags
 		# (debian/<version>) sometimes.
-		if ((grep /python3-(setuptools-scm|hatch-vcs)/, @deps) && !$ENV{'SETUPTOOLS_SCM_PRETEND_VERSION'}) {
+		if ((grep /python3-(setuptools-scm|flit-scm|hatch-vcs)/, @deps) && !$ENV{'SETUPTOOLS_SCM_PRETEND_VERSION'}) {
 			my $changelog = Dpkg::Changelog::Debian->new(range => {"count" => 1});
 			$changelog->load("debian/changelog");
 			my $version = @{$changelog}[0]->get_version();
@@ -135,6 +135,18 @@ sub pybuild_commands {
 			$version =~ s/^\d+://;    # epoch
 			$version =~ s/~/-/;       # ignore tilde versions
 			$ENV{'SETUPTOOLS_SCM_PRETEND_VERSION'} = $version;
+		}
+
+		# When depends on python3-poetry-dynamic-versioning, set
+		# POETRY_DYNAMIC_VERSIONING_BYPASS to upstream version
+		if ((grep /python3-poetry-dynamic-versioning/, @deps) && !$ENV{'POETRY_DYNAMIC_VERSIONING_BYPASS'}) {
+			my $changelog = Dpkg::Changelog::Debian->new(range => {"count" => 1});
+			$changelog->load("debian/changelog");
+			my $version = @{$changelog}[0]->get_version();
+			$version =~ s/-[^-]+$//;  # revision
+			$version =~ s/^\d+://;    # epoch
+			$version =~ s/~/-/;       # ignore tilde versions
+			$ENV{'POETRY_DYNAMIC_VERSIONING_BYPASS'} = $version;
 		}
 
 		# When depends on python{3,}-pbr, set PBR_VERSION to upstream version
@@ -157,7 +169,8 @@ sub pybuild_commands {
 				$ENV{'PYBUILD_TEST_NOSE2'} ne '1' and
 				$ENV{'PYBUILD_TEST_NOSE'} ne '1' and
 				$ENV{'PYBUILD_TEST_CUSTOM'} ne '1' and
-				$ENV{'PYBUILD_TEST_TOX'} ne '1') {
+				$ENV{'PYBUILD_TEST_TOX'} ne '1' and
+				$ENV{'PYBUILD_TEST_STESTR'} ne '1') {
 			if (grep {$_ eq 'tox'} @deps and $ENV{'PYBUILD_TEST_TOX'} ne '0') {
 				push @py3opts, '--test-tox'}
 			elsif (grep {$_ eq 'python3-pytest'} @deps and $ENV{'PYBUILD_TEST_PYTEST'} ne '0') {
@@ -166,6 +179,8 @@ sub pybuild_commands {
 				push @py3opts, '--test-nose2'}
 			elsif (grep {$_ eq 'python3-nose'} @deps and $ENV{'PYBUILD_TEST_NOSE'} ne '0') {
 				push @py3opts, '--test-nose'}
+			elsif (grep {$_ eq 'python3-stestr'} @deps and $ENV{'PYBUILD_TEST_STESTR'} ne '0') {
+                               push @py3opts, '--test-stestr'}
 		}
 
 		my $py3all = 0;

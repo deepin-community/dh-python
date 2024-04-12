@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from dhpython.depends import Dependencies
 from dhpython.version import Version
 
-from tests.common import FakeOptions
+from .common import FakeOptions
 
 
 def pep386(d):
@@ -18,15 +18,6 @@ def pep386(d):
         if isinstance(v, str):
             d[k] = {'dependency': v}
             d[k].setdefault('standard', 'PEP386')
-    return d
-
-
-def py27(d):
-    """Mark all pydist entries as being for Python 2.7"""
-    for k, v in d.items():
-        if isinstance(v, str):
-            d[k] = {'dependency': v}
-            d[k].setdefault('versions', {Version('2.7')})
     return d
 
 
@@ -87,7 +78,7 @@ class DependenciesTestCase(unittest.TestCase):
                 stats['dist-info'].add(fn)
 
         if write_files:
-            self.tempdir = TemporaryDirectory()
+            self.tempdir = TemporaryDirectory()  # pylint: disable=consider-using-with
             self.addCleanup(self.tempdir.cleanup)
             old_wd = os.getcwd()
             os.chdir(self.tempdir.name)
@@ -95,7 +86,7 @@ class DependenciesTestCase(unittest.TestCase):
 
         for fn, lines in write_files.items():
             os.makedirs(os.path.dirname(fn))
-            with open(fn, 'w') as f:
+            with open(fn, 'w', encoding="UTF-8") as f:
                 f.write('\n'.join(lines))
 
         cleanup = prime_pydist(self.impl, self.pydist)
@@ -138,32 +129,6 @@ class TestRequiresCPython3(DependenciesTestCase):
 
     def test_depends_on_quux(self):
         self.assertIn('python3-quux (>= 1.0~a1)', self.d.depends)
-
-
-class TestRequiresPyPy(DependenciesTestCase):
-    impl = 'pypy'
-    options = FakeOptions(guess_deps=True)
-    pydist = {
-        'bar': 'pypy-bar',
-        'baz': {'dependency': 'pypy-baz', 'standard': 'PEP386'},
-        'quux': {'dependency': 'pypy-quux', 'standard': 'PEP440'},
-    }
-    requires = {
-        'debian/foo/usr/lib/pypy/dist-packages/foo.egg-info/requires.txt': (
-            'bar',
-            'baz >= 1.0',
-            'quux >= 1.0a1',
-        )
-    }
-
-    def test_depends_on_bar(self):
-        self.assertIn('pypy-bar', self.d.depends)
-
-    def test_depends_on_baz(self):
-        self.assertIn('pypy-baz (>= 1.0)', self.d.depends)
-
-    def test_depends_on_quux(self):
-        self.assertIn('pypy-quux (>= 1.0~a1)', self.d.depends)
 
 
 class TestRequiresCompatible(DependenciesTestCase):
@@ -663,34 +628,6 @@ class TestEnvironmentMarkersEggInfo(TestEnvironmentMarkersDistInfo):
 
     def test_depends_on_un_marked_dependency_after_extra(self):
         raise unittest.SkipTest('Not possible in requires.txt')
-
-
-class TestEnvironmentMarkers27EggInfo(DependenciesTestCase):
-    options = FakeOptions(guess_deps=True)
-    impl = 'cpython2'
-    requires = {
-        'debian/foo/usr/lib/python2.7/dist-packages/foo.egg-info/requires.txt': (
-            "no_markers",
-            "[:os_name == 'posix']",
-            "os_posix",
-            "[:python_version >= '2.6']",
-            "python_version_ge26",
-        )
-    }
-    pydist = py27({
-        'no_markers': 'python-no-markers',
-        'os_posix': 'python-os-posix',
-        'python_version_ge26': 'python-python-version-ge26',
-    })
-
-    def test_depends_on_unmarked_packages(self):
-        self.assertIn('python-no-markers', self.d.depends)
-
-    def test_ignores_posix_packages(self):
-        self.assertNotInDepends('python-os-posix')
-
-    def test_ignores_pyversion_packages(self):
-        self.assertNotInDepends('python-python-version-ge26')
 
 
 class TestIgnoresUnusedModulesDistInfo(DependenciesTestCase):

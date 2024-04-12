@@ -41,6 +41,7 @@ except ModuleNotFoundError:
     SchemeDictionaryDestination = WheelFile = install = None
 
 from dhpython.build.base import Base, shell_command
+from dhpython.tools import dpkg_architecture
 
 log = logging.getLogger('dhpython')
 
@@ -67,30 +68,33 @@ class BuildSystem(Base):
         # Temporarily reduce the threshold while we're in beta
         result -= 20
 
-        try:
-            with open('pyproject.toml', 'rb') as f:
-                pyproject = tomllib.load(f)
-            if pyproject.get('build-system', {}).get('build-backend'):
-                result += 10
-            else:
-                # Not a PEP517 built package
-                result = 0
-        except NameError:
-            # No toml, no autdetection
-            result = 0
-        except FileNotFoundError:
-            # Not a PEP517 package
-            result = 0
+        if self._build_backend():
+            result += 10
+
         if result > 100:
             return 100
         return result
+
+    def _build_backend(self):
+        """Retrieve the build-system from pyproject.toml, where possible"""
+        try:
+            with open('pyproject.toml', 'rb') as f:
+                pyproject = tomllib.load(f)
+            return pyproject.get('build-system', {}).get('build-backend')
+        except NameError:
+            # No toml, no autdetection
+            return None
+        except FileNotFoundError:
+            # Not a PEP517 package
+            return None
 
     def clean(self, context, args):
         super().clean(context, args)
         if osp.exists(args['interpreter'].binary()):
             log.debug("removing '%s' (and everything under it)",
                       args['build_dir'])
-            osp.isdir(args['build_dir']) and shutil.rmtree(args['build_dir'])
+            if osp.isdir(args['build_dir']):
+                shutil.rmtree(args['build_dir'])
         return 0  # no need to invoke anything
 
     def configure(self, context, args):
@@ -104,16 +108,34 @@ class BuildSystem(Base):
         self.build_wheel(context, args)
         self.unpack_wheel(context, args)
 
+    def _backend_config_settings(self):
+        backend = self._build_backend()
+        if backend == "mesonpy":
+            arch_data = dpkg_architecture()
+            return [
+                "compile-args=--verbose",
+                # From Debhelper's meson.pm
+                "setup-args=--wrap-mode=nodownload",
+                "setup-args=--prefix=/usr",
+                "setup-args=--sysconfdir=/etc",
+                "setup-args=--localstatedir=/var",
+                "setup-args=--libdir=lib/" + arch_data["DEB_HOST_MULTIARCH"],
+            ]
+        return []
+
     @shell_command
     def build_wheel(self, context, args):
         """ build a wheel using the PEP517 builder defined by upstream """
         log.info('Building wheel for %s with "build" module',
                  args['interpreter'])
+        config_settings = self._backend_config_settings()
         context['ENV']['FLIT_NO_NETWORK'] = '1'
         context['ENV']['HOME'] = args['home_dir']
         return ('{interpreter} -m build '
                 '--skip-dependency-check --no-isolation --wheel '
-                '--outdir ' + args['home_dir'] +
+                '--outdir ' + args['home_dir'] + ' ' +
+                ' '.join(('--config-setting ' + setting)
+                         for setting in config_settings) +
                 ' {args}'
                )
 
@@ -125,9 +147,9 @@ class BuildSystem(Base):
         for extra in ('scripts', 'data'):
             path = Path(args["home_dir"]) / extra
             if osp.exists(path):
-                log.warning(f'{extra.title()} directory already exists, '
-                            'skipping unpack. '
-                            'Is the Python package being built twice?')
+                log.warning('%s directory already exists, skipping unpack. '
+                            'Is the Python package being built twice?',
+                            extra.title())
                 return
             extras[extra] = path
         destination = SchemeDictionaryDestination(

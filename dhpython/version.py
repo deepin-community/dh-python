@@ -48,6 +48,7 @@ class Version:
         >>> Version('0.0')
         Version('0.0')
         """
+        # pylint: disable=unused-argument
         if isinstance(value, (tuple, list)):
             value = '.'.join(str(i) for i in value)
         if isinstance(value, Version):
@@ -350,15 +351,15 @@ class VersionRange:
         for item in value.split(','):
             item = item.strip()
 
-            match = re.match('>=\s*([\d\.]+)', item)
+            match = re.match(r'>=\s*([\d\.]+)', item)
             if match:
                 minv = match.group(1)
                 continue
-            match = re.match('<<\s*([\d\.]+)', item)
+            match = re.match(r'<<\s*([\d\.]+)', item)
             if match:
                 maxv = match.group(1)
                 continue
-            match = re.match('^[\d\.]+$', item)
+            match = re.match(r'^[\d\.]+$', item)
             if match:
                 hardcoded.add(match.group(0))
 
