@@ -63,7 +63,7 @@ class Interpreter:
     :attr name: pypy or python (even for python3 and python-dbg) or empty string
     :attr version: interpreter's version
     :attr debug: -dbg version of the interpreter
-    :attr impl: implementation (cpytho2, cpython3 or pypy)
+    :attr impl: implementation (cpython3 or pypy)
     :attr options: options parsed from shebang
     :type path: str
     :type name: str
@@ -82,6 +82,7 @@ class Interpreter:
 
     def __init__(self, value=None, path=None, name=None, version=None,
                  debug=None, impl=None, options=None):
+        # pylint: disable=unused-argument
         params = locals()
         del params['self']
         del params['value']
@@ -115,17 +116,15 @@ class Interpreter:
                 if self.version:
                     if self.version.major == 3:
                         self.__dict__['impl'] = 'cpython3'
-                    else:
-                        self.__dict__['impl'] = 'cpython2'
             elif value == 'pypy':
-                self.__dict__['impl'] = 'pypy'
+                if self.version:
+                    if self.version.major == 3:
+                        self.__dict__['impl'] = 'pypy3'
         elif name == 'version' and value is not None:
             value = Version(value)
             if not self.impl and self.name == 'python':
                 if value.major == 3:
                     self.impl = 'cpython3'
-                else:
-                    self.impl = 'cpython2'
         if name in ('path', 'name', 'impl', 'options') and value is None:
             pass
         elif name == 'debug':
@@ -151,7 +150,7 @@ class Interpreter:
             return self.name
         version = version or self.version or ''
         if consider_default_ver and (not version or version == self.default_version):
-            version = '3' if self.impl == 'cpython3' else '2'
+            version = '3'
         if self.debug:
             return 'python{}-dbg'.format(version)
         return self.name + str(version)
@@ -202,8 +201,8 @@ class Interpreter:
             data = fp.read(96)
             if b"\0" in data:
                 raise ValueError('cannot parse binary file')
-        # make sure only first line is checkeed
-        data = str(data, 'utf-8').split('\n')[0]
+        # make sure only first line is checked
+        data = str(data, 'utf-8').split('\n', maxsplit=1)[0]
         if not data.startswith('#!'):
             raise ValueError("doesn't look like a shebang: %s" % data)
 
@@ -222,10 +221,6 @@ class Interpreter:
         >>> i = Interpreter('python')
         >>> i.sitedir(version='3.1')
         '/usr/lib/python3/dist-packages/'
-        >>> i.sitedir(version='2.5')
-        '/usr/lib/python2.5/site-packages/'
-        >>> i.sitedir(version=Version('2.7'))
-        '/usr/lib/python2.7/dist-packages/'
         >>> i.sitedir(version='3.1', gdb=True, package='python3-foo')
         'debian/python3-foo/usr/lib/debug/usr/lib/python3/dist-packages/'
         >>> i.sitedir(version=Version('3.2'))
@@ -235,14 +230,9 @@ class Interpreter:
             version = Version(version or self.version)
         except Exception as err:
             raise ValueError("cannot find valid version: %s" % err)
-        if self.impl == 'pypy':
-            path = '/usr/lib/pypy/dist-packages/'
-        elif version << Version('2.6'):
-            path = "/usr/lib/python%s/site-packages/" % version
-        elif version << Version('3.0'):
-            path = "/usr/lib/python%s/dist-packages/" % version
-        else:
-            path = '/usr/lib/python3/dist-packages/'
+        if version << Version('3.0'):
+            raise ValueError(f"The version {version} is no longer supported")
+        path = '/usr/lib/python3/dist-packages/'
 
         if gdb:
             path = "/usr/lib/debug%s" % path
@@ -287,6 +277,8 @@ class Interpreter:
 
     def should_ignore(self, path):
         """Return True if path is used by another interpreter implementation."""
+        if len(INTERPRETER_DIR_TPLS) == 1:
+            return
         cache_key = 'should_ignore_{}'.format(self.impl)
         if cache_key not in self.__class__._cache:
             expr = [v for k, v in INTERPRETER_DIR_TPLS.items() if k != self.impl]
@@ -324,8 +316,6 @@ class Interpreter:
     def magic_number(self, version=None):
         """Return magic number."""
         version = Version(version or self.version)
-        if self.impl == 'cpython2':
-            return ''
         result = self._execute('import imp; print(imp.get_magic())', version)
         return eval(result)
 
@@ -345,7 +335,7 @@ class Interpreter:
         """Return multiarch tag."""
         version = Version(version or self.version)
         try:
-            soabi, multiarch = self._get_config(version)[:2]
+            _, multiarch = self._get_config(version)[:2]
         except Exception:
             log.debug('cannot get multiarch', exc_info=True)
             # interpreter without multiarch support
@@ -363,7 +353,7 @@ class Interpreter:
         version = Version(version or self.version)
         # NOTE: it's not the same as magic_tag
         try:
-            soabi, multiarch = self._get_config(version)[:2]
+            soabi, _ = self._get_config(version)[:2]
         except Exception:
             log.debug('cannot get soabi', exc_info=True)
             # interpreter without soabi support
@@ -374,13 +364,11 @@ class Interpreter:
     def include_dir(self):
         """Return INCLUDE_DIR path.
 
-        >>> Interpreter('python2.7').include_dir       # doctest: +SKIP
-        '/usr/include/python2.7'
+        >>> Interpreter('python3.8').include_dir       # doctest: +SKIP
+        '/usr/include/python3.8'
         >>> Interpreter('python3.8-dbg').include_dir   # doctest: +SKIP
         '/usr/include/python3.8d'
         """
-        if self.impl == 'pypy':
-            return '/usr/lib/pypy/include'
         try:
             result = self._get_config()[2]
             if result:
@@ -407,31 +395,8 @@ class Interpreter:
         return result
 
     @property
-    def symlinked_include_dir(self):
-        """Return path to symlinked include directory."""
-        if self.impl in ('cpython2', 'pypy') or self.debug \
-           or self.version >> '3.7' or self.version << '3.3':
-            # these interpreters do not provide symlink,
-            # others provide it in libpython3.X-dev
-            return
-        try:
-            result = self._get_config()[2]
-            if result:
-                if result.endswith('m'):
-                    return result[:-1]
-                else:
-                    # there's include_dir, but no "m"
-                    return
-        except Exception:
-            result = '/usr/include/{}'.format(self.name)
-            log.debug('cannot get include path', exc_info=True)
-        return result
-
-    @property
     def library_file(self):
         """Return libfoo.so file path."""
-        if self.impl == 'pypy':
-            return ''
         libpl, ldlibrary = self._get_config()[3:5]
         if ldlibrary.endswith('.a'):
             # python3.1-dbg, python3.2, python3.2-dbg returned static lib
@@ -485,20 +450,14 @@ class Interpreter:
         tmp_multiarch = info['multiarch'] or multiarch
 
         result = info['name']
-        if result.endswith('module') and result != 'module' and (
-           self.impl == 'cpython3' and version >> '3.2' or
-           self.impl == 'cpython2' and version == '2.7'):
+        if result.endswith('module') and result != 'module' and self.impl == 'cpython3':
             result = result[:-6]
 
         if tmp_soabi:
             result = "{}.{}".format(result, tmp_soabi)
-            if tmp_multiarch and not (self.impl == 'cpython3' and version << '3.3') and tmp_multiarch not in soabi:
+            if tmp_multiarch and tmp_multiarch not in soabi:
                 result = "{}-{}".format(result, tmp_multiarch)
-        elif self.impl == 'cpython2' and version == '2.7' and tmp_multiarch:
-            result = "{}.{}".format(result, tmp_multiarch)
 
-        if self.debug and self.impl == 'cpython2':
-            result += '_d'
         result += '.so'
         if fname == result:
             return
@@ -511,29 +470,18 @@ class Interpreter:
         'python3-foo'
         >>> Interpreter('python3.8').suggest_pkg_name('foo_bar')
         'python3-foo-bar'
-        >>> Interpreter('python2.7-dbg').suggest_pkg_name('bar')
-        'python-bar-dbg'
+        >>> Interpreter('python3.8-dbg').suggest_pkg_name('bar')
+        'python3-bar-dbg'
         """
         name = name.replace('_', '-')
-        if self.impl == 'pypy':
-            return 'pypy-{}'.format(name)
-        version = '3' if self.impl == 'cpython3' else ''
-        result = 'python{}-{}'.format(version, name)
+        result = 'python3-{}'.format(name)
         if self.debug:
             result += '-dbg'
         return result
 
     def _get_config(self, version=None):
         version = Version(version or self.version)
-        # sysconfig module is available since Python 3.2
-        # (also backported to Python 2.7)
-        if self.impl == 'pypy' or self.impl.startswith('cpython') and (
-                version >> '2.6' and version << '3'
-                or version >> '3.1' or version == '3'):
-            cmd = 'import sysconfig as s;'
-        else:
-            cmd = 'from distutils import sysconfig as s;'
-        cmd += 'print("__SEP__".join(i or "" ' \
+        cmd = 'import sysconfig as s; print("__SEP__".join(i or "" ' \
                'for i in s.get_config_vars('\
                '"SOABI", "MULTIARCH", "INCLUDEPY", "LIBPL", "LDLIBRARY")))'
         conf_vars = self._execute(cmd, version).split('__SEP__')

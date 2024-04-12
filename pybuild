@@ -41,12 +41,12 @@ def main(cfg):
     from dhpython.debhelper import DebHelper, build_options
     from dhpython.version import Version, build_sorted, get_requested_versions
     from dhpython.interpreter import Interpreter
-    from dhpython.tools import execute, move_matching_files
+    from dhpython.tools import dpkg_architecture, execute, move_matching_files
 
     if cfg.list_systems:
         for name, Plugin in sorted(build.plugins.items()):
             print(name, '\t', Plugin.DESCRIPTION)
-        exit(0)
+        sys.exit(0)
 
     nocheck = False
     if 'DEB_BUILD_OPTIONS' in environ:
@@ -70,13 +70,8 @@ def main(cfg):
     if 'DEB_PYTHON_INSTALL_LAYOUT' not in env:
         env['DEB_PYTHON_INSTALL_LAYOUT'] = 'deb'
 
-    arch_data = {}
-    if exists('/usr/bin/dpkg-architecture'):
-        res = execute('/usr/bin/dpkg-architecture')
-        for line in res['stdout'].splitlines():
-            key, value = line.strip().split('=', 1)
-            arch_data[key] = value
-
+    arch_data = dpkg_architecture()
+    if arch_data:
         # Set _PYTHON_HOST_PLATFORM to ensure debugging symbols on, f.e. i386
         # emded a constant name regardless of the 32/64-bit kernel.
         special_cases = {
@@ -111,7 +106,7 @@ def main(cfg):
         Plugin = build.plugins.get(selected_plugin)
         if not Plugin:
             log.error('unrecognized build system: %s', selected_plugin)
-            exit(10)
+            sys.exit(10)
         plugin = Plugin(cfg)
         context = {'ENV': env, 'args': {}, 'dir': cfg.dir}
         plugin.detect(context)
@@ -121,7 +116,7 @@ def main(cfg):
             try:
                 tmp_plugin = Plugin(cfg)
             except Exception as err:
-                log.warn('cannot initialize %s plugin: %s', Plugin.NAME,
+                log.warning('cannot initialize %s plugin: %s', Plugin.NAME,
                          err, exc_info=cfg.verbose)
                 continue
             tmp_context = {'ENV': env, 'args': {}, 'dir': cfg.dir}
@@ -133,7 +128,7 @@ def main(cfg):
         if not plugin:
             log.error('cannot detect build system, please use --system option'
                       ' or set PYBUILD_SYSTEM env. variable')
-            exit(11)
+            sys.exit(11)
 
     if plugin.SUPPORTED_INTERPRETERS is not True:
         # if versioned interpreter was requested and selected plugin lists
@@ -146,18 +141,19 @@ def main(cfg):
                 if m:
                     ver = m.group('version')
                     updated = set(tpl.format(version=ver) for tpl in tpls)
-                    updated and plugin.SUPPORTED_INTERPRETERS.update(updated)
+                    if updated:
+                        plugin.SUPPORTED_INTERPRETERS.update(updated)
 
     for interpreter in cfg.interpreter:
         if plugin.SUPPORTED_INTERPRETERS is not True and interpreter not in plugin.SUPPORTED_INTERPRETERS:
             log.error('interpreter %s not supported by %s', interpreter, plugin)
-            exit(12)
+            sys.exit(12)
     log.debug('detected build system: %s (certainty: %s%%)', plugin.NAME, certainty)
 
     if cfg.detect_only:
         if not cfg.really_quiet:
             print(plugin.NAME)
-        exit(0)
+        sys.exit(0)
 
     versions = cfg.versions
     if not versions:
@@ -245,8 +241,6 @@ def main(cfg):
                                       '/usr/lib/python{version}/dist-packages'
                                       ).format(version=version, interpreter=i),
             'home_dir': abspath(home_dir)})
-        if interpreter == 'pypy':
-            args['install_dir'] = '/usr/lib/pypy/dist-packages/'
         env = dict(args.get('ENV', {}))
         pp = env.get('PYTHONPATH', context['ENV'].get('PYTHONPATH'))
         pp = pp.split(':') if pp else []
@@ -260,8 +254,8 @@ def main(cfg):
         # cross compilation support for Python 2.x
         if (version.major == 2 and
             arch_data.get('DEB_BUILD_ARCH') != arch_data.get('DEB_HOST_ARCH')):
-            pp.insert(0, ('/usr/lib/python{0}/plat-{1[DEB_HOST_MULTIARCH]}'
-                         ).format(version, arch_data))
+            pp.insert(0, ('/usr/lib/python{0}/plat-{1}'
+                         ).format(version, arch_data['DEB_HOST_MULTIARCH']))
         env['PYTHONPATH'] = ':'.join(pp)
         # cross compilation support for Python <= 3.8 (see above)
         if version.major == 3:
@@ -286,14 +280,14 @@ def main(cfg):
         disabled = (get_option('disable', i, version) or '').split()
         for item in disabled:
             if item in (step, '1'):
-                log.debug('disabling {} step for {} {}'.format(step, i, version))
+                log.debug('disabling %s step for %s %s', step, i, version)
                 return True
             if item.startswith(prefix):
                 disabled.append(item[len(prefix):])
         if i in disabled or str(version) in disabled or \
                 i.format(version=version) in disabled or \
                 i.format(version=version.major) in disabled:
-            log.debug('disabling {} step for {} {}'.format(step, i, version))
+            log.debug('disabling %s step for %s %s', step, i, version)
             return True
         return False
 
@@ -319,7 +313,7 @@ def main(cfg):
 
         fpath = join(args['home_dir'], 'testfiles_to_rm_before_install')
         if step == 'install' and exists(fpath):
-            with open(fpath) as fp:
+            with open(fpath, encoding="UTF-8") as fp:
                 for line in fp:
                     path = line.strip('\n')
                     if exists(path):
@@ -374,10 +368,10 @@ def main(cfg):
     if func:
         step = func.__func__.__name__
         if step == 'test' and nocheck:
-            exit(0)
+            sys.exit(0)
         failure = False
         for i in cfg.interpreter:
-            ipreter = Interpreter(interpreter.format(version=versions[0]))
+            ipreter = Interpreter(i.format(version=versions[0]))
             iversions = build_sorted(versions, impl=ipreter.impl)
             if '{version}' not in i and len(versions) > 1:
                 log.info('limiting Python versions to %s due to missing {version}'
@@ -398,19 +392,19 @@ def main(cfg):
                     # one of them fails to make build logs more verbose:
                     failure = True
                     if step not in ('build', 'test', 'autopkgtest'):
-                        exit(13)
+                        sys.exit(13)
                 if step == 'install':
                     move_to_ext_destdir(i, version, c)
         if failure:
             # exit with a non-zero return code if at least one build/test failed
-            exit(13)
-        exit(0)
+            sys.exit(13)
+        sys.exit(0)
 
     ### all functions for interpreters in batches mode ###
     try:
         context_map = {}
         for i in cfg.interpreter:
-            ipreter = Interpreter(interpreter.format(version=versions[0]))
+            ipreter = Interpreter(i.format(version=versions[0]))
             iversions = build_sorted(versions, impl=ipreter.impl)
             if '{version}' not in i and len(versions) > 1:
                 log.info('limiting Python versions to %s due to missing {version}'
@@ -440,7 +434,7 @@ def main(cfg):
     except Exception as err:
         log.error('plugin %s failed: %s', plugin.NAME, err,
                   exc_info=cfg.verbose)
-        exit(14)
+        sys.exit(14)
 
 
 def parse_args(argv):
@@ -528,6 +522,9 @@ def parse_args(argv):
     tests.add_argument('--test-tox', action='store_true',
                        default=environ.get('PYBUILD_TEST_TOX') == '1',
                        help='use tox in --test step')
+    tests.add_argument('--test-stestr', action='store_true',
+                       default=environ.get('PYBUILD_TEST_STESTR') == '1',
+                       help='use stestr in --test step')
     tests.add_argument('--test-custom', action='store_true',
                        default=environ.get('PYBUILD_TEST_CUSTOM') == '1',
                        help='use custom command in --test step')
@@ -572,7 +569,7 @@ def parse_args(argv):
     limit.add_argument('--disable', metavar='ITEMS',
                        help='disable action, interpreter or version')
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.interpreter:
         args.interpreter = environ.get('PYBUILD_INTERPRETERS', 'python{version}').split()
     if not args.versions:
@@ -585,7 +582,7 @@ def parse_args(argv):
         args.versions = versions
 
     if args.test_nose or args.test_nose2 or args.test_pytest or args.test_tox\
-       or args.test_custom or args.system == 'custom':
+       or args.test_stestr or args.test_custom or args.system == 'custom':
         args.custom_tests = True
     else:
         args.custom_tests = False
@@ -594,7 +591,7 @@ def parse_args(argv):
 
 
 if __name__ == '__main__':
-    cfg = parse_args(sys.argv)
+    cfg = parse_args(sys.argv[1:])
     if cfg.really_quiet:
         cfg.quiet = True
         log.setLevel(logging.CRITICAL)
