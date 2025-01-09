@@ -53,9 +53,13 @@ class ShareFilesTestCase(MergeWheelTestCase):
         super().setUp()
         self.destdir = TemporaryDirectory()  # pylint: disable=consider-using-with
         self.addCleanup(self.destdir.cleanup)
-        share_files(self.tempdir.name, self.destdir.name,
-                    Interpreter(self.impl),
-                    FakeOptions(**self.options))
+        self.interpreter = Interpreter(self.impl)
+
+    def share_files(self, options=None):
+        if options is None:
+            options = self.options
+        share_files(self.tempdir.name, self.destdir.name, self.interpreter,
+                    FakeOptions(**options))
 
     def destPath(self, name):
         return Path(self.destdir.name) / name
@@ -76,6 +80,7 @@ class HatchlingLicenseTest(ShareFilesTestCase):
     }
 
     def test_removes_license_files(self):
+        self.share_files()
         self.assertFalse(
             self.destPath('foo.dist-info/license_files/LICENSE.txt').exists())
         self.assertFalse(
@@ -97,5 +102,26 @@ class FlitLicenseTest(ShareFilesTestCase):
     }
 
     def test_removes_license_files(self):
+        self.share_files()
         self.assertFalse(self.destPath('foo.dist-info/COPYING.LESSER').exists())
         self.assertFalse(self.destPath('foo.dist-info/COPYING').exists())
+
+
+class CExtensionsRenameTest(ShareFilesTestCase):
+    def setUp(self):
+        ver = Interpreter(self.impl).default_version
+        self.files = {
+            f'usr/lib/python{ver}/foo.so': ('binary-data'),
+        }
+        self.ext_filename = f'usr/lib/python{ver}/foo.so'
+        super().setUp()
+
+    def test_python_extensions(self):
+        self.share_files()
+        self.assertFalse(self.destPath(self.ext_filename).exists())
+        expected_name = self.interpreter.check_extname(self.ext_filename)
+        self.assertTrue(self.destPath(expected_name).exists())
+
+    def test_no_ext_rename(self):
+        self.share_files(options={"no_ext_rename": True})
+        self.assertTrue(self.destPath(self.ext_filename).exists())

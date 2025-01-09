@@ -107,6 +107,8 @@ DEB_VERS_OPS = {
     '>':  '>>',
     '~=': '>=',
 }
+# Optimize away any dependencies on Python less than:
+MIN_PY_VERSION = [3, 9]
 
 
 def validate(fpath):
@@ -226,9 +228,21 @@ def guess_dependency(impl, req, version=None, bdep=None,
                     req_d['operator'] not in (None, '!='):
                 o = _translate_op(req_d['operator'])
                 v = _translate(req_d['version'], item['rules'], item['standard'])
-                d = "%s (%s %s)%s" % (
-                    item['dependency'], o, v, env_marker_alts)
-                if req_d['version2'] and req_d['operator2'] not in (None,'!='):
+                if req_d['operator'] == '==' and req_d['operator2'] is None:
+                    # Loosen for Debian revisions
+                    m = re.search(r"(.*)(\d+)(\D*)$", v)
+                    if m:
+                        max_v = m.group(1) + str((int(m.group(2))) + 1) + m.group(3) + "~"
+                    else:
+                        max_v = v + ".0~"
+                    d = "%s (>= %s)%s, %s (<< %s)%s" % (
+                        item['dependency'], v, env_marker_alts,
+                        item['dependency'], max_v, env_marker_alts,
+                    )
+                else:
+                    d = "%s (%s %s)%s" % (
+                        item['dependency'], o, v, env_marker_alts)
+                if req_d['version2'] and req_d['operator2'] not in (None, '!='):
                     o2 = _translate_op(req_d['operator2'])
                     v2 = _translate(req_d['version2'], item['rules'], item['standard'])
                     d += ", %s (%s %s)%s" % (
@@ -415,17 +429,17 @@ def check_environment_marker_restrictions(req, marker_str, impl):
         # even though we don't currently emit them in python3-supported-min/max
 
         if op == '<':
-            if int_ver <= [3, 0, 0]:
+            if int_ver <= MIN_PY_VERSION:
                 return False
             return f'| python3-supported-min (>= {env_ver})'
         elif op == '<=':
             return f'| python3-supported-min (>> {env_ver})'
         elif op == '>=':
-            if int_ver < [3, 0, 0]:
+            if int_ver < MIN_PY_VERSION:
                 return True
             return f'| python3-supported-max (<< {env_ver})'
         elif op == '>':
-            if int_ver < [3, 0, 0]:
+            if int_ver < MIN_PY_VERSION:
                 return True
             return f'| python3-supported-max (<= {env_ver})'
         elif op == '==':
@@ -461,8 +475,9 @@ def check_environment_marker_restrictions(req, marker_str, impl):
     return True
 
 
-def parse_pydep(impl, fname, bdep=None, options=None,
-                depends_sec=None, recommends_sec=None, suggests_sec=None):
+def parse_pydep(impl, fname, bdep=None,
+                *, options=None, depends_sec=None, recommends_sec=None,
+                suggests_sec=None):
     depends_sec = depends_sec or []
     recommends_sec = recommends_sec or []
     suggests_sec = suggests_sec or []
@@ -535,8 +550,9 @@ def parse_pydep(impl, fname, bdep=None, options=None,
     return result
 
 
-def parse_requires_dist(impl, fname, bdep=None, options=None, depends_sec=None,
-                        recommends_sec=None, suggests_sec=None):
+def parse_requires_dist(impl, fname, bdep=None,
+                        *, options=None, depends_sec=None, recommends_sec=None,
+                        suggests_sec=None):
     """Extract dependencies from a dist-info/METADATA file"""
     depends_sec = depends_sec or []
     recommends_sec = recommends_sec or []
