@@ -1,3 +1,61 @@
+dh-python (6.20250108) unstable; urgency=medium
+
+  * Adjust CExtensionsRenameTest to always use the default Python 3 version.
+    (Closes: #1092545)
+
+ -- Stefano Rivera <stefanor@debian.org>  Wed, 08 Jan 2025 17:27:01 -0400
+
+dh-python (6.20241217) unstable; urgency=medium
+
+  * Document how to build multiple python modules in the same source package
+    with --name in pybuild.1. (See: #1088676)
+  * Don't pass dh_auto_install's default destdir to pybuild, allowing it to be
+    overridden.
+  * Remove test dependency on the debhelper python-distuils plugin.
+    (Closes: #1090343)
+  * Refresh pydist fallback data.
+
+ -- Stefano Rivera <stefanor@debian.org>  Tue, 17 Dec 2024 08:49:26 -0400
+
+dh-python (6.20241024) unstable; urgency=medium
+
+  * dh_python3: Suppress generated dependencies that would be satisfied by
+    python3 >= 3.9.
+  * Run pybuild with --verbose in autopkgtests.
+  * Don't trip over .coverage files. (Closes: #1081618)
+  * Handle blank lines in .pyinstall and .pyremove, thanks Julian Gilbey.
+    (Closes: #1075744)
+  * Loosen exact Python version dependencies to accept Debian upload
+    revisions. (Closes: #1083054)
+
+ -- Stefano Rivera <stefanor@debian.org>  Thu, 24 Oct 2024 13:20:13 -0700
+
+dh-python (6.20240824) unstable; urgency=medium
+
+  * pybuild: Drop support for setup.py test, now that setuptools 72 has
+    removed it.  (Closes: #982298)
+  * Bump Standards-Version to 4.7.0, no changes needed.
+  * dh_python3: Improve documentation for -X / --exclude.
+
+ -- Stefano Rivera <stefanor@debian.org>  Sat, 24 Aug 2024 16:51:33 +0200
+
+dh-python (6.20240603) unstable; urgency=medium
+
+  * Support dynamic versions in pdm.
+  * Remove broken comment detection from pydist fallback generation script.
+  * Update pydist data.
+
+ -- Stefano Rivera <stefanor@debian.org>  Wed, 03 Jul 2024 12:33:43 +0200
+
+dh-python (6.20240422) unstable; urgency=medium
+
+  * Add support for Python 3.11 and 3.12 in test_interpreter.
+  * Add generic test for the current default Python 3 interpreter in
+    test_interpreter.
+  * dh_python3: Don't rename _module to module. (Closes: #1068255)
+
+ -- Stefano Rivera <stefanor@debian.org>  Mon, 22 Apr 2024 18:40:47 -0400
+
 dh-python (6.20240401) unstable; urgency=medium
 
   [ Stefano Rivera ]

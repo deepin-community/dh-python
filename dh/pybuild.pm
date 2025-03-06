@@ -75,9 +75,8 @@ sub build {
 
 sub install {
 	my $this=shift;
-	my $destdir=shift;
 	foreach my $command ($this->pybuild_commands('install', @_)) {
-		doit(@$command, '--dest-dir', $destdir);
+		doit(@$command);
 	}
 }
 
@@ -113,6 +112,14 @@ sub pybuild_commands {
 		push @options, '--quiet';
 	}
 
+	# Pass dh's destdir, if it's not the default value
+	if ($step eq 'install') {
+		my $destdir = shift(@options);
+		if ($destdir ne "debian/tmp") {
+			push @options, "--dest-dir=$destdir";
+		}
+	}
+
 	my @deps;
 	if ($ENV{'PYBUILD_INTERPRETERS'}) {
 		push @result, ['pybuild', "--$step", @options];
@@ -135,6 +142,18 @@ sub pybuild_commands {
 			$version =~ s/^\d+://;    # epoch
 			$version =~ s/~/-/;       # ignore tilde versions
 			$ENV{'SETUPTOOLS_SCM_PRETEND_VERSION'} = $version;
+		}
+
+		# When depends on python3-pdm-backend, set PDM_BUILD_SCM_VERSION to
+		# upstream version
+		if ((grep /python3-pdm-backend/, @deps) && !$ENV{'PDM_BUILD_SCM_VERSION'}) {
+			my $changelog = Dpkg::Changelog::Debian->new(range => {"count" => 1});
+			$changelog->load("debian/changelog");
+			my $version = @{$changelog}[0]->get_version();
+			$version =~ s/-[^-]+$//;  # revision
+			$version =~ s/^\d+://;    # epoch
+			$version =~ s/~/-/;       # ignore tilde versions
+			$ENV{'PDM_BUILD_SCM_VERSION'} = $version;
 		}
 
 		# When depends on python3-poetry-dynamic-versioning, set
