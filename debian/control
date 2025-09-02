@@ -15,7 +15,7 @@ Build-Depends:
  python3-minimal,
  python3-nose2 <!nocheck>,
  python3-setuptools,
-Standards-Version: 4.7.0
+Standards-Version: 4.7.2
 Vcs-Git: https://salsa.debian.org/python-team/tools/dh-python.git
 Vcs-Browser: https://salsa.debian.org/python-team/tools/dh-python
 Rules-Requires-Root: no
@@ -24,8 +24,6 @@ Package: dh-python
 Architecture: all
 Multi-Arch: foreign
 Depends:
-# depend on setuptools to help packages migrate from distutils. Remove once 3.12 is default
- python3-setuptools,
  ${misc:Depends},
  ${python3:Depends},
 Provides:

@@ -1,3 +1,32 @@
+dh-python (6.20250414) unstable; urgency=medium
+
+  [ Colin Watson ]
+  * Document "architecture" field in
+    debian/tests/autopkgtest-pkg-pybuild.conf.
+
+  [ Stefano Rivera ]
+  * Parse an unversioned python shebang as being Python 3. This eases handling
+    for setuptools >= 76 which, will emit "/usr/bin/python" shebangs, even
+    when the build is run by "/usr/bin/python3". (Closes: #1103150)
+  * Bump Standards-Version to 4.7.2, no changes needed.
+  * Update pydist data.
+
+ -- Stefano Rivera <stefanor@debian.org>  Mon, 14 Apr 2025 16:39:29 -0400
+
+dh-python (6.20250308) unstable; urgency=medium
+
+  * Exclude Pyside6 from cpython3_fallback, maintainers need to explicitly
+    depend on the modules they require.
+
+ -- Stefano Rivera <stefanor@debian.org>  Sat, 08 Mar 2025 09:00:48 -0400
+
+dh-python (6.20250306) unstable; urgency=medium
+
+  * Update pydist data.
+  * Drop the python3-setuptools dependency.
+
+ -- Stefano Rivera <stefanor@debian.org>  Thu, 06 Mar 2025 10:54:33 -0400
+
 dh-python (6.20250108) unstable; urgency=medium
 
   * Adjust CExtensionsRenameTest to always use the default Python 3 version.
