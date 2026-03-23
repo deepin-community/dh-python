@@ -20,30 +20,50 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+from contextlib import contextmanager
 from pathlib import Path
+from typing import override
+from collections.abc import Iterator
 import logging
 import os.path as osp
 import shutil
 import sysconfig
-try:
-    import tomllib
-except ModuleNotFoundError:
-    try:
-        import tomli as tomllib
-    except ModuleNotFoundError:
-        # Plugin still works, only needed for autodetection
-        pass
+import tomllib
+
 try:
     from installer import install
     from installer.destinations import SchemeDictionaryDestination
     from installer.sources import WheelFile
+    from installer.utils import parse_metadata_file
 except ModuleNotFoundError:
-    SchemeDictionaryDestination = WheelFile = install = None
+    SchemeDictionaryDestination = WheelFile = install = parse_metadata_file = None  # type: ignore
 
-from dhpython.build.base import Base, shell_command
+from dhpython.build.base import Base, shell_command, create_setuptools_parallel_cfg
+from dhpython.build.types import Context, Args
 from dhpython.tools import dpkg_architecture
 
 log = logging.getLogger('dhpython')
+
+
+def _build_backend() -> str | None:
+    """Retrieve the build-system from pyproject.toml, where possible"""
+    try:
+        with open('pyproject.toml', 'rb') as f:
+            pyproject = tomllib.load(f)
+        backend = pyproject.get('build-system', {}).get('build-backend')
+        if backend is None:
+            return None
+        assert isinstance(backend, str)
+        return backend
+    except NameError:
+        # No toml, no autdetection
+        return None
+    except FileNotFoundError:
+        # Not a PEP517 package
+        return None
+    except tomllib.TOMLDecodeError as e:
+        log.warning("pyproject.toml: TOMLDecodeError: %s", str(e))
+        return None
 
 
 class BuildSystem(Base):
@@ -53,7 +73,8 @@ class BuildSystem(Base):
     OPTIONAL_FILES = {}
     CLEAN_FILES = Base.CLEAN_FILES | {'build'}
 
-    def detect(self, context):
+    @override
+    def detect(self, context: Context) -> int:
         """Return certainty level that this plugin describes the right build
         system
 
@@ -68,51 +89,41 @@ class BuildSystem(Base):
         # Temporarily reduce the threshold while we're in beta
         result -= 20
 
-        if self._build_backend():
+        if _build_backend():
             result += 10
 
         if result > 100:
             return 100
         return result
 
-    def _build_backend(self):
-        """Retrieve the build-system from pyproject.toml, where possible"""
-        try:
-            with open('pyproject.toml', 'rb') as f:
-                pyproject = tomllib.load(f)
-            return pyproject.get('build-system', {}).get('build-backend')
-        except NameError:
-            # No toml, no autdetection
-            return None
-        except FileNotFoundError:
-            # Not a PEP517 package
-            return None
-
-    def clean(self, context, args):
+    @override
+    def clean(self, context: Context, args: Args) -> None:
         super().clean(context, args)
-        if osp.exists(args['interpreter'].binary()):
-            log.debug("removing '%s' (and everything under it)",
-                      args['build_dir'])
-            if osp.isdir(args['build_dir']):
-                shutil.rmtree(args['build_dir'])
-        return 0  # no need to invoke anything
+        if osp.exists(args.interpreter.binary()):
+            log.debug("removing '%s' (and everything under it)", args.build_dir)
+            if osp.isdir(args.build_dir):
+                shutil.rmtree(args.build_dir)
 
-    def configure(self, context, args):
+    @override
+    def configure(self, context: Context, args: Args) -> None:
         if install is None:
             raise Exception("PEP517 plugin dependencies are not available. "
                             "Please Build-Depend on pybuild-plugin-pyproject.")
         # No separate configure step
-        return 0
 
-    def build(self, context, args):
+    @override
+    def build(self, context: Context, args: Args) -> None:
         self.build_wheel(context, args)
         self.unpack_wheel(context, args)
 
-    def _backend_config_settings(self):
-        backend = self._build_backend()
+    def _backend_config_settings(self, args: Args) -> list[str]:
+        backend = _build_backend()
         if backend == "mesonpy":
             arch_data = dpkg_architecture()
             return [
+                # build_dir is where we unpack the wheel, so we need to build
+                # elsewhere.
+                f"build-dir={args.home_dir}/meson-build",
                 "compile-args=--verbose",
                 # From Debhelper's meson.pm
                 "setup-args=--wrap-mode=nodownload",
@@ -124,59 +135,68 @@ class BuildSystem(Base):
         return []
 
     @shell_command
-    def build_wheel(self, context, args):
+    @create_setuptools_parallel_cfg(backend=_build_backend)
+    @override
+    def build_wheel(self, context: Context, args: Args) -> str:
         """ build a wheel using the PEP517 builder defined by upstream """
-        log.info('Building wheel for %s with "build" module',
-                 args['interpreter'])
-        config_settings = self._backend_config_settings()
-        context['ENV']['FLIT_NO_NETWORK'] = '1'
-        context['ENV']['HOME'] = args['home_dir']
+        log.info('Building wheel for %s with "build" module', args.interpreter)
+        config_settings = self._backend_config_settings(args)
+        context.ENV['FLIT_NO_NETWORK'] = '1'
+        context.ENV['HOME'] = args.home_dir
         return ('{interpreter} -m build '
                 '--skip-dependency-check --no-isolation --wheel '
-                '--outdir ' + args['home_dir'] + ' ' +
+                '--outdir ' + args.home_dir + ' ' +
                 ' '.join(('--config-setting ' + setting)
                          for setting in config_settings) +
                 ' {args}'
                )
 
-    def unpack_wheel(self, context, args):
-        """ unpack the wheel into pybuild's normal  """
-        log.info('Unpacking wheel built for %s with "installer" module',
-                 args['interpreter'])
-        extras = {}
-        for extra in ('scripts', 'data'):
-            path = Path(args["home_dir"]) / extra
-            if osp.exists(path):
-                log.warning('%s directory already exists, skipping unpack. '
-                            'Is the Python package being built twice?',
-                            extra.title())
-                return
-            extras[extra] = path
-        destination = SchemeDictionaryDestination(
-            {
-                'platlib': args['build_dir'],
-                'purelib': args['build_dir'],
-                'scripts': extras['scripts'],
-                'data': extras['data'],
-            },
-            interpreter=args['interpreter'].binary_dv,
-            script_kind='posix',
-        )
-
-        wheel = Path(self.built_wheel(context, args))
+    @contextmanager
+    def opened_wheel(self, context: Context, args: Args) -> Iterator[WheelFile]:
+        wheel_fn = self.built_wheel(context, args)
+        if not wheel_fn:
+            raise AssertionError("Unable to locate a built wheel")
+        wheel = Path(wheel_fn)
         if wheel.name.startswith('UNKNOWN'):
             raise Exception(f'UNKNOWN wheel found: {wheel.name}. Does '
                             'pyproject.toml specify a build-backend?')
         with WheelFile.open(wheel) as source:
+            yield source
+
+    def unpack_wheel(self, context: Context, args: Args) -> None:
+        """ unpack the wheel into pybuild's normal  """
+        log.info('Unpacking wheel built for %s with "installer" module', args.interpreter)
+        extras = {}
+        for extra in ('scripts', 'data', 'include'):
+            path = Path(args.home_dir) / extra
+            if path.exists():
+                log.warning('%s directory already exists, skipping unpack. '
+                            'Is the Python package being built twice?',
+                            extra.title())
+                return
+            extras[extra] = str(path)
+        destination = SchemeDictionaryDestination(
+            {
+                'platlib': args.build_dir,
+                'purelib': args.build_dir,
+                'scripts': extras["scripts"],
+                'data': extras["data"],
+                'headers': extras["include"],
+            },
+            interpreter=args.interpreter.binary_dv,
+            script_kind='posix',
+        )
+
+        with self.opened_wheel(context, args) as source:
             install(
                 source=source,
                 destination=destination,
                 additional_metadata={},
             )
 
-    def install(self, context, args):
-        log.info('Copying package built for %s to destdir',
-                 args['interpreter'])
+    @override
+    def install(self, context: Context, args: Args) -> None:
+        log.info('Copying package built for %s to destdir', args.interpreter)
         try:
             paths = sysconfig.get_paths(scheme='deb_system')
         except KeyError:
@@ -184,12 +204,22 @@ class BuildSystem(Base):
             # TODO: Introduce a version check once sysconfig is patched.
             paths = sysconfig.get_paths(scheme='posix_prefix')
 
-        # start by copying the data and scripts
-        for extra in ('data', 'scripts'):
-            src_dir = Path(args['home_dir']) / extra
+        # start by copying the data, scripts, and headers
+        for extra in ('data', 'scripts', 'include'):
+            src_dir = Path(args.home_dir) / extra
             if not src_dir.exists():
                 continue
-            target_dir = args['destdir'] + paths[extra]
+            if extra == 'include':
+                with self.opened_wheel(context, args) as source:
+                    metadata = parse_metadata_file(
+                        source.read_dist_info("METADATA")
+                    )
+                    extra_path = osp.join(
+                        args.interpreter.include_dir, metadata["Name"]
+                    )
+            else:
+                extra_path = paths[extra]
+            target_dir = args.destdir + extra_path
             log.debug('Copying %s directory contents from %s -> %s',
                       extra, src_dir, target_dir)
             shutil.copytree(
@@ -199,8 +229,8 @@ class BuildSystem(Base):
             )
 
         # then copy the modules
-        module_dir = args['build_dir']
-        target_dir = args['destdir'] + args['install_dir']
+        module_dir = args.build_dir
+        target_dir = args.destdir + args.install_dir
         log.debug('Copying module contents from %s -> %s',
                   module_dir, target_dir)
         shutil.copytree(
@@ -210,9 +240,10 @@ class BuildSystem(Base):
         )
 
     @shell_command
-    def test(self, context, args):
-        scripts = Path(args["home_dir"]) / 'scripts'
+    @override
+    def test(self, context: Context, args: Args) -> str:
+        scripts = Path(args.home_dir) / 'scripts'
         if scripts.exists():
-            context['ENV']['PATH'] = f"{scripts}:{context['ENV']['PATH']}"
-        context['ENV']['HOME'] = args['home_dir']
-        return super().test(context, args)
+            context.ENV['PATH'] = f"{scripts}:{context.ENV['PATH']}"
+        context.ENV['HOME'] = args.home_dir
+        return super().test_cmd(context, args)

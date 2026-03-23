@@ -23,19 +23,29 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Iterable, Sequence
 from filecmp import cmp as cmpfile
-from os.path import (lexists, exists, isdir, islink, join, realpath, split,
-                     splitext)
+from os.path import lexists, exists, isdir, islink, join, realpath, split, splitext
+from pathlib import Path
 from shutil import rmtree
 from stat import ST_MODE, S_IXUSR, S_IXGRP, S_IXOTH
-from dhpython import MULTIARCH_DIR_TPL
+from typing import Literal, TypedDict
+
+from dhpython import CACHE_DIRECTORIES, MULTIARCH_DIR_TPL
 from dhpython.tools import fix_shebang, clean_egg_name
-from dhpython.interpreter import Interpreter
+from dhpython.interpreter import EXTFILE_RE, Interpreter
+from dhpython.options import DHPythonOptions
+from dhpython.version import Version
 
-log = logging.getLogger('dhpython')
+log = logging.getLogger("dhpython")
 
 
-def fix_locations(package, interpreter, versions, options):
+def fix_locations(
+    package: str,
+    interpreter: Interpreter,
+    versions: Sequence[Version],
+    options: DHPythonOptions,
+) -> None:
     """Move files to the right location."""
     # make a copy since we change version later
     interpreter = Interpreter(interpreter)
@@ -47,7 +57,7 @@ def fix_locations(package, interpreter, versions, options):
         for srcdir in interpreter.old_sitedirs(package):
             if isdir(srcdir):
                 # TODO: what about relative symlinks?
-                log.debug('moving files from %s to %s', srcdir, dstdir)
+                log.debug("moving files from %s to %s", srcdir, dstdir)
                 share_files(srcdir, dstdir, interpreter, options)
                 try:
                     os.removedirs(srcdir)
@@ -58,7 +68,7 @@ def fix_locations(package, interpreter, versions, options):
         dstdir = interpreter.sitedir(package, gdb=True)
         for srcdir in interpreter.old_sitedirs(package, gdb=True):
             if isdir(srcdir):
-                log.debug('moving files from %s to %s', srcdir, dstdir)
+                log.debug("moving files from %s to %s", srcdir, dstdir)
                 share_files(srcdir, dstdir, interpreter, options)
                 try:
                     os.removedirs(srcdir)
@@ -66,20 +76,27 @@ def fix_locations(package, interpreter, versions, options):
                     pass
 
 
-def share_files(srcdir, dstdir, interpreter, options):
+def share_files(
+    srcdir: str,
+    dstdir: str,
+    interpreter: Interpreter,
+    options: DHPythonOptions,
+) -> None:
     """Try to move as many files from srcdir to dstdir as possible."""
-    cleanup_actions = []
     for i in os.listdir(srcdir):
         fpath1 = join(srcdir, i)
         if not lexists(fpath1):  # removed in rename_ext
             continue
-        if i.endswith('.pyc'):  # f.e. when tests were invoked on installed files
+        if i.endswith(".pyc"):  # f.e. when tests were invoked on installed files
             os.remove(fpath1)
             continue
-        if i == ".coverage":  # from running tests with coverage
-            os.remove(fpath1)
+        if i in CACHE_DIRECTORIES:
+            if os.path.isdir(fpath1):
+                rmtree(fpath1)
+            else:
+                os.remove(fpath1)
             continue
-        if not options.no_ext_rename and splitext(i)[-1] == '.so':
+        if not options.no_ext_rename and splitext(i)[-1] == ".so":
             # try to rename extension here as well (in :meth:`scan` info about
             # Python version is gone)
             version = interpreter.parse_public_dir(srcdir)
@@ -87,8 +104,9 @@ def share_files(srcdir, dstdir, interpreter, options):
                 fpath1 = Scan.rename_ext(fpath1, interpreter, version)
                 i = split(fpath1)[-1]
         if srcdir.endswith(".dist-info"):
-            if (i.startswith(('LICENCE', 'LICENSE', 'COPYING', 'NOTICE', 'AUTHORS'))
-                    or i in ('licenses', 'license_files')):
+            if i.startswith(
+                ("LICENCE", "LICENSE", "COPYING", "NOTICE", "AUTHORS")
+            ) or i in ("licenses", "license_files"):
                 if isdir(fpath1):
                     rmtree(fpath1)
                 else:
@@ -99,6 +117,7 @@ def share_files(srcdir, dstdir, interpreter, options):
             # do not rename directories here - all .so files have to be renamed first
             os.renames(fpath1, fpath2)
             continue
+        ext_m = EXTFILE_RE.search(i)
         if islink(fpath1):
             # move symlinks without changing them if they point to the same place
             if not exists(fpath2):
@@ -109,8 +128,10 @@ def share_files(srcdir, dstdir, interpreter, options):
             share_files(fpath1, fpath2, interpreter, options)
         elif cmpfile(fpath1, fpath2, shallow=False):
             os.remove(fpath1)
-        elif i.endswith(('.abi3.so', '.abi4.so')) and interpreter.parse_public_dir(srcdir):
-            log.warning('%s differs from previous one, removing anyway (%s)', i, srcdir)
+        elif (
+            ext_m and ext_m.group("stableabi") and interpreter.parse_public_dir(srcdir)
+        ):
+            log.warning("%s differs from previous one, removing anyway (%s)", i, srcdir)
             os.remove(fpath1)
         elif srcdir.endswith(".dist-info"):
             # dist-info file that differs... try merging
@@ -122,8 +143,8 @@ def share_files(srcdir, dstdir, interpreter, options):
                 log.warning("No merge driver for dist-info file %s", i)
         else:
             # The files differed so we cannot collapse them.
-            log.warning('Paths differ: %s and %s', fpath1, fpath2)
-            if options.verbose and not i.endswith(('.so', '.a')):
+            log.warning("Paths differ: %s and %s", fpath1, fpath2)
+            if options.verbose and not i.endswith((".so", ".a")):
                 with open(fpath1, encoding="UTF-8") as fp1:
                     fromlines = fp1.readlines()
                 with open(fpath2, encoding="UTF-8") as fp2:
@@ -131,8 +152,6 @@ def share_files(srcdir, dstdir, interpreter, options):
                 diff = difflib.unified_diff(fromlines, tolines, fpath1, fpath2)
                 sys.stderr.writelines(diff)
 
-    for action, args in cleanup_actions:
-        action(dstdir, *args)
     try:
         os.removedirs(srcdir)
     except OSError:
@@ -141,7 +160,8 @@ def share_files(srcdir, dstdir, interpreter, options):
 
 ## Functions to merge parts of the .dist-info metadata directory together
 
-def missing_lines(src, dst):
+
+def missing_lines(src: str | Path, dst: str | Path) -> list[str]:
     """Find all the lines in the text file src that are not in dst"""
     with open(dst, encoding="UTF-8") as fh:
         current = {k: None for k in fh.readlines()}
@@ -155,7 +175,7 @@ def missing_lines(src, dst):
     return missing
 
 
-def merge_WHEEL(src, dst):
+def merge_WHEEL(src: str | Path, dst: str | Path) -> int:
     """Merge the source .dist-info/WHEEL file into the destination
 
     Note that after editing the WHEEL file, the sha256 included in
@@ -164,7 +184,7 @@ def merge_WHEEL(src, dst):
     """
     log.debug("Merging WHEEL file %s into %s", src, dst)
     missing = missing_lines(src, dst)
-    with open(dst, "at", encoding="UTF-8") as fh:
+    with open(dst, "a", encoding="UTF-8") as fh:
         for line in missing:
             if line.startswith("Tag: "):
                 fh.write(line)
@@ -174,15 +194,15 @@ def merge_WHEEL(src, dst):
     return len(missing)
 
 
-def write_INSTALLER(distdir):
-    """Write 'debain' as the INSTALLER"""
+def write_INSTALLER(distdir: str) -> None:
+    """Write 'debian' as the INSTALLER"""
     log.debug("Writing INSTALLER in %s", distdir)
     installer = join(distdir, "INSTALLER")
     with open(installer, "w", encoding="UTF-8") as f:
         f.write("debian\n")
 
 
-def remove_RECORD(distdir):
+def remove_RECORD(distdir: str) -> None:
     """Remove RECORD from a .dist-info.
 
     Having this breaks multi-arch installation, as the contents differ.
@@ -194,11 +214,44 @@ def remove_RECORD(distdir):
         pass
 
 
-class Scan:
-    UNWANTED_DIRS = re.compile(r'.*/__pycache__(/.*)?$')
-    UNWANTED_FILES = re.compile(r'.*\.py[co]$')
+ScanResult = TypedDict(
+    "ScanResult",
+    {
+        "requires.txt": set[str],
+        "egg-info": set[str],
+        "dist-info": set[str],
+        "nsp.txt": set[str],
+        "shebangs": set[Interpreter],
+        "public_vers": set[Version],
+        "private_dirs": dict[str, "ScanResult"],
+        "compile": bool,
+        "ext_vers": set[Version],
+        "ext_stableabi": set[str],
+        "ext_no_version": set[str],
+    },
+)
 
-    def __init__(self, interpreter, package, dpath=None, options=None):
+
+class Scan:
+    UNWANTED_DIRS = re.compile(r".*/__pycache__(/.*)?$")
+    UNWANTED_FILES = re.compile(r".*\.py[co]$")
+
+    interprter: Interpreter
+    impl: str
+    package: str
+    proot: str
+    dpath: str | None | Literal[False]
+    options: DHPythonOptions
+    result: ScanResult
+
+    def __init__(
+        self,
+        interpreter: Interpreter,
+        package: str,
+        dpath: str | None = None,
+        *,
+        options: DHPythonOptions,
+    ) -> None:
         self.interpreter = interpreter
         self.impl = interpreter.impl
 
@@ -207,22 +260,25 @@ class Scan:
         if not dpath:
             self.proot = "debian/%s" % self.package
         else:
-            dpath = dpath.strip('/')
-            self.proot = join('debian', self.package, dpath)
+            dpath = dpath.strip("/")
+            self.proot = join("debian", self.package, dpath)
         self.dpath = dpath
         del dpath
 
         self.options = options
-        self.result = {'requires.txt': set(),
-                       'egg-info': set(),
-                       'dist-info': set(),
-                       'nsp.txt': set(),
-                       'shebangs': set(),
-                       'public_vers': set(),
-                       'private_dirs': {},
-                       'compile': False,
-                       'ext_vers': set(),
-                       'ext_no_version': set()}
+        self.result = {
+            "requires.txt": set(),
+            "egg-info": set(),
+            "dist-info": set(),
+            "nsp.txt": set(),
+            "shebangs": set(),
+            "public_vers": set(),
+            "private_dirs": {},
+            "compile": False,
+            "ext_vers": set(),
+            "ext_stableabi": set(),
+            "ext_no_version": set(),
+        }
 
         for root, dirs, file_names in os.walk(self.proot):
             if interpreter.should_ignore(root):
@@ -241,17 +297,18 @@ class Scan:
                 self.current_dir_is_public = False
 
             if self.current_dir_is_public:
-                if root.endswith('-packages'):
+                if root.endswith("-packages"):
                     if version is not None:
-                        self.result['public_vers'].add(version)
+                        assert isinstance(version, Version)
+                        self.result["public_vers"].add(version)
                     for name in dirs[:]:
-                        if name in ('test', 'tests') or name.startswith('.'):
-                            log.debug('removing dist-packages/%s', name)
+                        if name in ("test", "tests") or name.startswith("."):
+                            log.debug("removing dist-packages/%s", name)
                             rmtree(join(root, name))
                             dirs.remove(name)
                     for name in file_names[:]:
-                        if name.startswith('.'):
-                            log.debug('removing dist-packages/%s', name)
+                        if name.startswith("."):
+                            log.debug("removing dist-packages/%s", name)
                             os.remove(join(root, name))
                             file_names.remove(name)
             else:
@@ -284,7 +341,7 @@ class Scan:
                 fpath = join(root, fn)
 
                 if self.is_unwanted_file(fpath):
-                    log.debug('removing unwanted: %s', fpath)
+                    log.debug("removing unwanted: %s", fpath)
                     os.remove(fpath)
                     continue
 
@@ -294,40 +351,59 @@ class Scan:
 
                 if not exists(fpath):
                     # possibly removed while handling .so symlinks
-                    if islink(fpath) and '.so.' in split(fpath)[-1]:
+                    if islink(fpath) and ".so." in split(fpath)[-1]:
                         # dangling symlink to (now removed/renamed) .so file
                         # which wasn't removed yet (see test203's quux.so.0)
-                        log.info('removing dangling symlink: %s', fpath)
+                        log.info("removing dangling symlink: %s", fpath)
                         os.remove(fpath)
                     continue
 
                 fext = splitext(fn)[-1][1:]
-                if fext == 'so':
+                ext_m = EXTFILE_RE.search(fn)
+                if ext_m:
                     if not self.options.no_ext_rename:
                         fpath = self.rename_ext(fpath, interpreter, version)
-                    ver = self.handle_ext(fpath)  # pylint: disable=assignment-from-none
-                    ver = ver or version
-                    if ver:
-                        self.current_result.setdefault('ext_vers', set()).add(ver)
+                        ext_m = EXTFILE_RE.search(os.path.basename(fpath))
+                        assert ext_m is not None
+                    ver = version
+
+                    if ext_m["ver"]:
+                        assert ext_m["ver"].startswith("3")
+                        if ext_m["ver"] == "3":
+                            ver = None
+                        ver = Version("3." + ext_m["ver"][1:])
                     else:
-                        self.current_result.setdefault('ext_no_version', set()).add(fpath)
+                        ver = None
+                    if ver:
+                        self.current_result.setdefault("ext_vers", set()).add(ver)
+                    elif ext_m["stableabi"]:
+                        self.current_result.setdefault("ext_stableabi", set()).add(
+                            fpath
+                        )
+                    else:
+                        self.current_result.setdefault("ext_no_version", set()).add(
+                            fpath
+                        )
 
                 if self.current_private_dir:
-                    if exists(fpath) and fext != 'so':
+                    if exists(fpath) and fext != "so":
                         mode = os.stat(fpath)[ST_MODE]
                         if mode & S_IXUSR or mode & S_IXGRP or mode & S_IXOTH:
-                            if (options.no_shebang_rewrite or
-                                fix_shebang(fpath, self.options.shebang)) and \
-                                    not self.options.ignore_shebangs:
+                            if (
+                                options.no_shebang_rewrite
+                                or fix_shebang(fpath, self.options.shebang)
+                            ) and not self.options.ignore_shebangs:
                                 try:
                                     res = Interpreter.from_file(fpath)
                                 except Exception as e:
-                                    log.debug('cannot parse shebang %s: %s', fpath, e)
+                                    log.debug("cannot parse shebang %s: %s", fpath, e)
                                 else:
-                                    self.current_result.setdefault('shebangs', set()).add(res)
+                                    self.current_result.setdefault(
+                                        "shebangs", set()
+                                    ).add(res)
 
-                if fext == 'py':
-                    self.current_result['compile'] = True
+                if fext == "py":
+                    self.current_result["compile"] = True
 
             if not dirs and not self.current_private_dir:
                 try:
@@ -338,24 +414,43 @@ class Scan:
         log.debug("package %s details = %s", package, self.result)
 
     @property
-    def current_result(self):
+    def current_result(self) -> ScanResult:
         if self.current_private_dir:
-            return self.result['private_dirs'].setdefault(self.current_private_dir, {})
+            return self.result["private_dirs"].setdefault(
+                self.current_private_dir,
+                {
+                    "requires.txt": set(),
+                    "egg-info": set(),
+                    "dist-info": set(),
+                    "nsp.txt": set(),
+                    "shebangs": set(),
+                    "public_vers": set(),
+                    "private_dirs": {},
+                    "compile": False,
+                    "ext_vers": set(),
+                    "ext_stableabi": set(),
+                    "ext_no_version": set(),
+                },
+            )
         return self.result
 
-    def is_unwanted_dir(self, dpath):
-        return self.__class__.UNWANTED_DIRS.match(dpath)
+    def is_unwanted_dir(self, dpath: str) -> bool:
+        return self.__class__.UNWANTED_DIRS.match(dpath) is not None
 
-    def is_unwanted_file(self, fpath):
+    def is_unwanted_file(self, fpath: str) -> bool:
         if self.__class__.UNWANTED_FILES.match(fpath):
             return True
-        if self.current_dir_is_public and self.is_dbg_package\
-                and self.options.clean_dbg_pkg\
-                and splitext(fpath)[-1][1:] not in ('so', 'h'):
+        if (
+            self.current_dir_is_public
+            and self.is_dbg_package
+            and self.options.clean_dbg_pkg
+            and splitext(fpath)[-1][1:] not in ("so", "h")
+        ):
             return True
+        return False
 
     @property
-    def private_dirs_to_check(self):
+    def private_dirs_to_check(self) -> list[str]:
         if self.dpath:
             # scan private directory *only*
             return [self.dpath]
@@ -363,26 +458,33 @@ class Scan:
         if self.dpath is False:
             result = []
         else:
-            result = [i % self.package for i in (
-                      'usr/lib/%s',
-                      'usr/lib/games/%s',
-                      'usr/share/%s',
-                      'usr/share/games/%s')]
+            result = [
+                i % self.package
+                for i in (
+                    "usr/lib/%s",
+                    "usr/lib/games/%s",
+                    "usr/share/%s",
+                    "usr/share/games/%s",
+                )
+            ]
         return result
 
     @property
-    def is_dbg_package(self):
-        #return self.interpreter.debug
-        return self.package.endswith('-dbg')
+    def is_dbg_package(self) -> bool:
+        # return self.interpreter.debug
+        return self.package.endswith("-dbg")
 
-    def check_private_dir(self, dpath):
+    def check_private_dir(self, dpath: str) -> str | None:
         """Return private dir's root if it's a private dir."""
         for i in self.private_dirs_to_check:
-            if dpath.startswith(join('debian', self.package, i)):
-                return '/' + i
+            if dpath.startswith(join("debian", self.package, i)):
+                return "/" + i
+        return None
 
     @staticmethod
-    def rename_ext(fpath, interpreter, current_pub_version=None):
+    def rename_ext(
+        fpath: str, interpreter: Interpreter, current_pub_version: Version | None = None
+    ) -> str:
         """Add multiarch triplet, etc. Return new name.
 
         This method is invoked for all .so files in public or private directories.
@@ -390,7 +492,7 @@ class Scan:
         # current_pub_version - version parsed from dist-packages (True if unversioned)
         # i.e. if it's not None - it's a public dist-packages directory
 
-        path, fname = fpath.rsplit('/', 1)
+        path, fname = fpath.rsplit("/", 1)
         if current_pub_version is not None and islink(fpath):
             # replace symlinks with extensions in dist-packages directory
             dstfpath = fpath
@@ -398,12 +500,12 @@ class Scan:
             while islink(dstfpath):
                 links.add(dstfpath)
                 dstfpath = join(path, os.readlink(dstfpath))
-            if exists(dstfpath) and '.so.' in split(dstfpath)[-1]:
+            if exists(dstfpath) and ".so." in split(dstfpath)[-1]:
                 # rename .so.$FOO symlinks, remove other ones
                 for lpath in links:
-                    log.info('removing symlink: %s', lpath)
+                    log.info("removing symlink: %s", lpath)
                     os.remove(lpath)
-                log.info('renaming %s to %s', dstfpath, fname)
+                log.info("renaming %s to %s", dstfpath, fname)
                 os.rename(dstfpath, fpath)
 
         if MULTIARCH_DIR_TPL.match(fpath):
@@ -415,30 +517,27 @@ class Scan:
             # TODO: what about symlinks pointing to this file
             new_fpath = join(path, new_fn)
             if exists(new_fpath):
-                log.warning('destination file exist, '
-                         'cannot rename %s to %s', fname, new_fn)
+                log.warning(
+                    "destination file exist, cannot rename %s to %s", fname, new_fn
+                )
             else:
-                log.info('renaming %s to %s', fname, new_fn)
+                log.info("renaming %s to %s", fname, new_fn)
                 os.rename(fpath, new_fpath)
             return new_fpath
         return fpath
 
-    def handle_ext(self, fpath):
-        """Handle .so file, return its version if detected."""
-        # pylint: disable=unused-argument
-        return None
-
-    def is_bin_dir(self, dpath):
+    def is_bin_dir(self, dpath: str) -> bool:
         """Check if dir is one from PATH ones."""
         # dname = debian/packagename/usr/games
-        spath = dpath.strip('/').split('/', 4)
+        spath = dpath.strip("/").split("/", 4)
         if len(spath) > 4:
             return False  # assume bin directories don't have subdirectories
-        if dpath.endswith(('/sbin', '/bin', '/usr/games')):
+        if dpath.endswith(("/sbin", "/bin", "/usr/games")):
             # /(s)bin or /usr/(s)bin or /usr/games
             return True
+        return False
 
-    def handle_bin_dir(self, dpath, file_names):
+    def handle_bin_dir(self, dpath: str, file_names: Iterable[str]) -> None:
         if self.options.no_shebang_rewrite or self.options.ignore_shebangs:
             return
         for fn in file_names:
@@ -447,16 +546,17 @@ class Scan:
                 try:
                     res = Interpreter.from_file(fpath)
                 except Exception as e:
-                    log.debug('cannot parse shebang %s: %s', fpath, e)
+                    log.debug("cannot parse shebang %s: %s", fpath, e)
                 else:
-                    self.result['shebangs'].add(res)
+                    self.result["shebangs"].add(res)
 
-    def is_egg_dir(self, dname):
+    def is_egg_dir(self, dname: str) -> bool:
         """Check if given directory contains egg-info."""
-        return dname.endswith('.egg-info')
+        return dname.endswith(".egg-info")
 
-    def handle_egg_dir(self, dpath, file_names):
-        path, dname = dpath.rsplit('/', 1)
+    def handle_egg_dir(self, dpath: str, file_names: list[str]) -> None:
+        # NOTE: Mutates file_names
+        path, dname = dpath.rsplit("/", 1)
         if self.is_dbg_package and self.options.clean_dbg_pkg:
             rmtree(dpath)
             return
@@ -464,47 +564,46 @@ class Scan:
         clean_name = clean_egg_name(dname)
         if clean_name != dname:
             if exists(join(path, clean_name)):
-                log.info('removing %s (%s is already available)', dname, clean_name)
+                log.info("removing %s (%s is already available)", dname, clean_name)
                 rmtree(dpath)
                 return
             else:
-                log.info('renaming %s to %s', dname, clean_name)
+                log.info("renaming %s to %s", dname, clean_name)
                 os.rename(dpath, join(path, clean_name))
                 dname = clean_name
                 dpath = join(path, dname)
         if file_names:
-            if 'requires.txt' in file_names:
-                self.result['requires.txt'].add(join(dpath, 'requires.txt'))
-            if 'namespace_packages.txt' in file_names:
-                self.result['nsp.txt'].add(join(dpath, 'namespace_packages.txt'))
-            if 'PKG-INFO' in file_names:
-                self.result['egg-info'].add(join(dpath, 'PKG-INFO'))
-            if 'SOURCES.txt' in file_names:
-                os.remove(join(dpath, 'SOURCES.txt'))
-                file_names.remove('SOURCES.txt')
+            if "requires.txt" in file_names:
+                self.result["requires.txt"].add(join(dpath, "requires.txt"))
+            if "namespace_packages.txt" in file_names:
+                self.result["nsp.txt"].add(join(dpath, "namespace_packages.txt"))
+            if "PKG-INFO" in file_names:
+                self.result["egg-info"].add(join(dpath, "PKG-INFO"))
+            if "SOURCES.txt" in file_names:
+                os.remove(join(dpath, "SOURCES.txt"))
+                file_names.remove("SOURCES.txt")
 
-    def is_egg_file(self, fpath):
+    def is_egg_file(self, fpath: str) -> bool:
         """Check if given file contains egg-info."""
-        return fpath.endswith('.egg-info')
+        return fpath.endswith(".egg-info")
 
-    def handle_egg_file(self, fpath):
-        root, name = fpath.rsplit('/', 1)
+    def handle_egg_file(self, fpath: str) -> None:
+        root, name = fpath.rsplit("/", 1)
         clean_name = clean_egg_name(name)
         if clean_name != name:
             if exists(join(root, clean_name)):
-                log.info('removing %s (%s is already available)',
-                         name, clean_name)
+                log.info("removing %s (%s is already available)", name, clean_name)
                 os.remove(fpath)
             else:
-                log.info('renaming %s to %s', name, clean_name)
+                log.info("renaming %s to %s", name, clean_name)
                 os.rename(fpath, join(root, clean_name))
-        self.result['egg-info'].add(join(root, clean_name))
+        self.result["egg-info"].add(join(root, clean_name))
 
-    def is_dist_dir(self, dname):
+    def is_dist_dir(self, dname: str) -> bool:
         """Check if given directory contains dist-info."""
-        return dname.endswith('.dist-info')
+        return dname.endswith(".dist-info")
 
-    def handle_dist_dir(self, dpath, file_names):
+    def handle_dist_dir(self, dpath: str, file_names: Iterable[str]) -> None:
         if self.is_dbg_package and self.options.clean_dbg_pkg:
             rmtree(dpath)
             return
@@ -512,15 +611,15 @@ class Scan:
         if file_names:
             write_INSTALLER(dpath)
             remove_RECORD(dpath)
-            if 'METADATA' in file_names:
-                self.result['dist-info'].add(join(dpath, 'METADATA'))
+            if "METADATA" in file_names:
+                self.result["dist-info"].add(join(dpath, "METADATA"))
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         if self.is_dbg_package and self.options.clean_dbg_pkg:
             # remove empty directories in -dbg packages
-            proot = self.proot + '/usr/lib'
+            proot = self.proot + "/usr/lib"
             for root, _, file_names in os.walk(proot, topdown=False):
-                if '-packages/' in root and not file_names:
+                if "-packages/" in root and not file_names:
                     try:
                         os.removedirs(root)
                     except Exception:

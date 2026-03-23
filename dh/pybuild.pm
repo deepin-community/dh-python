@@ -2,12 +2,12 @@
 #
 # Copyright: © 2012-2013 Piotr Ożarowski
 
-# TODO:
-# * support for dh --parallel
 
 package Debian::Debhelper::Buildsystem::pybuild;
 
 use strict;
+use Cwd;
+use File::Spec;
 use Dpkg::Control;
 use Dpkg::Changelog::Debian;
 use Debian::Debhelper::Dh_Lib qw(%dh error doit);
@@ -115,11 +115,13 @@ sub pybuild_commands {
 	# Pass dh's destdir, if it's not the default value
 	if ($step eq 'install') {
 		my $destdir = shift(@options);
-		if ($destdir ne "debian/tmp") {
+		if (File::Spec->rel2abs($destdir, getcwd()) ne File::Spec->rel2abs("debian/tmp", getcwd())) {
 			push @options, "--dest-dir=$destdir";
 		}
 	}
 
+	my $parallel = $this->get_parallel();
+	push @options, "--parallel=$parallel";
 	my @deps;
 	if ($ENV{'PYBUILD_INTERPRETERS'}) {
 		push @result, ['pybuild', "--$step", @options];
