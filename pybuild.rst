@@ -87,7 +87,9 @@ ACTION
 
 TESTS
 -----
-    unittest's discover from standard library is used in test step by default.
+    unittest's discover from standard library is used in test step by
+    default. But if no tests are found, this is ignored. Use
+    `--test-unittest` to require tests to be run.
 
     --test-nose
         use nose module in test step, remember to add python3-nose to
@@ -104,6 +106,9 @@ TESTS
     --test-stestr
         use stestr command in test step, remember to add python3-stestr
         to Build-Depends.
+    --test-unittest
+        use unittest discover in the test step, requiring at least 1
+        test to be discovered.
     --test-custom
         use a custom command in the test step. The full test command is
         then specified with `--test-args` or by setting the
@@ -122,6 +127,11 @@ testfiles
     and `tests` directories are copied to build directory.
     If `testfiles` are provided, it overrides these defaults, if
     still required they need to be explicitly specified.
+
+    By default, the test files are copied at the root of the build directory.
+    You can optionally specify a destination as second argument in the
+    `testfiles`. If the destination ends with a `/` it is treated as a target
+    directory into which the file will be copied.
 
 BUILD SYSTEM ARGUMENTS
 ----------------------
@@ -222,6 +232,8 @@ LIMITATIONS
         disable action, interpreter, version or any mix of them.
         Note that f.e. python3 and python3-dbg are two different interpreters,
         --disable test/python3 doesn't disable python3-dbg's tests.
+  -j NUM, --parallel NUM
+	specify number of parallel jobs [default: 1]
 
 disable examples
 ~~~~~~~~~~~~~~~~

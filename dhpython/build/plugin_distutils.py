@@ -19,17 +19,38 @@
 # THE SOFTWARE.
 
 import logging
+from collections.abc import Callable
+from functools import wraps
 from glob import glob1
 from os import remove
 from os.path import exists, isdir, join
 from shutil import rmtree, move
-from dhpython.build.base import Base, shell_command, copy_test_files
+from typing import (
+    TYPE_CHECKING,
+    Concatenate,
+    Literal,
+    ParamSpec,
+    TypeVar,
+    override
+)
+
+from dhpython.build.base import Base, shell_command, copy_test_files, create_setuptools_parallel_cfg
+from dhpython.build.types import Args, Context
+
+if TYPE_CHECKING:
+    from functools import _Wrapped
+
 
 log = logging.getLogger('dhpython')
 _setup_tpl = 'setup.py|setup-3.py'
 
 
-def create_pydistutils_cfg(func):
+P = ParamSpec('P')
+T = TypeVar('T')
+
+def create_pydistutils_cfg(
+    func: Callable[Concatenate["BuildSystem", Context, Args, P], T]
+) -> "_Wrapped[Concatenate[BuildSystem, Context, Args, P], T, Concatenate[BuildSystem, Context, Args, P], T]":
     """distutils doesn't have sane command-line API - this decorator creates
     .pydistutils.cfg file to workaround it
 
@@ -37,26 +58,32 @@ def create_pydistutils_cfg(func):
     distutils/setuptools/distribute sources
     """
 
-    def wrapped_func(self, context, args, *oargs, **kwargs):
-        fpath = join(args['home_dir'], '.pydistutils.cfg')
+    @wraps(func)
+    def wrapped_func(
+        self: "BuildSystem",
+        context: Context,
+        args: Args,
+        *oargs: P.args,
+        **kwargs: P.kwargs
+    ) -> T:
+        fpath = join(args.home_dir, '.pydistutils.cfg')
         if not exists(fpath):
             with open(fpath, 'w', encoding='utf-8') as fp:
                 lines = ['[clean]\n',
                          'all=1\n',
                          '[build]\n',
-                         'build_lib={}\n'.format(args['build_dir']),
+                         'build_lib={}\n'.format(args.build_dir),
                          '[install]\n',
                          'force=1\n',
                          'install_layout=deb\n',
                          'install_scripts=$base/bin\n',
-                         'install_lib={}\n'.format(args['install_dir']),
+                         'install_lib={}\n'.format(args.install_dir),
                          'prefix=/usr\n']
                 log.debug('pydistutils config file:\n%s', ''.join(lines))
                 fp.writelines(lines)
-        context['ENV']['HOME'] = args['home_dir']
+        context.ENV['HOME'] = args.home_dir
         return func(self, context, args, *oargs, **kwargs)
 
-    wrapped_func.__name__ = func.__name__
     return wrapped_func
 
 
@@ -71,60 +98,67 @@ class BuildSystem(Base):
                       '*.egg-info': 10}
     CLEAN_FILES = Base.CLEAN_FILES | {'build'}
 
-    def detect(self, context):
+    @override
+    def detect(self, context: Context) -> int:
         result = super().detect(context)
         if _setup_tpl in self.DETECTED_REQUIRED_FILES:
-            context['args']['setup_py'] = self.DETECTED_REQUIRED_FILES[_setup_tpl][0]
+            context.args['setup_py'] = self.DETECTED_REQUIRED_FILES[_setup_tpl][0]
         else:
-            context['args']['setup_py'] = 'setup.py'
+            context.args['setup_py'] = 'setup.py'
         return result
 
     @shell_command
     @create_pydistutils_cfg
-    def clean(self, context, args):
+    @override
+    def clean(self, context: Context, args: Args) -> str | Literal[0]:
         super().clean(context, args)
-        if exists(args['interpreter'].binary()):
+        if exists(args.interpreter.binary()):
             return '{interpreter} {setup_py} clean {args}'
         return 0  # no need to invoke anything
 
     @shell_command
     @create_pydistutils_cfg
-    def configure(self, context, args):
+    @override
+    def configure(self, context: Context, args: Args) -> str:
         return '{interpreter} {setup_py} config {args}'
 
     @shell_command
     @create_pydistutils_cfg
-    def build(self, context, args):
+    @override
+    def build(self, context: Context, args: Args) -> str:
         return '{interpreter.binary_dv} {setup_py} build {args}'
 
     @shell_command
-    def _bdist_wheel(self, context, args):
+    @create_setuptools_parallel_cfg()
+    def _bdist_wheel(self, context: Context, args: Args) -> str:
         # pylint: disable=unused-argument
         try:
             # pylint: disable=unused-import
-            import wheel
+            import wheel  # type: ignore
         except ImportError:
             raise Exception("wheel is required to build wheels for distutils/setuptools packages. Build-Depend on python3-wheel.")
         # Don't build a wheel in the deb install layout
-        fpath = join(args['home_dir'], '.pydistutils.cfg')
+        fpath = join(args.home_dir, '.pydistutils.cfg')
         remove(fpath)
         return '{interpreter.binary_dv} -c "import setuptools, runpy; runpy.run_path(\'{setup_py}\')" bdist_wheel {args}'
 
-    def build_wheel(self, context, args):
+    @override
+    def build_wheel(self, context: Context, args: Args) -> None:
         self._bdist_wheel(context, args)
-        dist_dir = join(args['dir'], 'dist')
+        dist_dir = join(args.dir, 'dist')
         wheels = glob1(dist_dir, '*.whl')
         n_wheels = len(wheels)
         if n_wheels != 1:
             raise Exception(f"Expected 1 wheel, found {n_wheels}")
-        move(join(dist_dir, wheels[0]), args['home_dir'])
+        move(join(dist_dir, wheels[0]), args.home_dir)
 
     @shell_command
     @create_pydistutils_cfg
-    def install(self, context, args):
+    @override
+    def install(self, context: Context, args: Args) -> str:
         # remove egg-info dirs from build_dir
-        for fname in glob1(args['build_dir'], '*.egg-info'):
-            fpath = join(args['build_dir'], fname)
+        for fname in glob1(args.build_dir, '*.egg-info'):
+            fpath = join(args.build_dir, fname)
             if isdir(fpath):
                 rmtree(fpath)
             else:
@@ -135,5 +169,6 @@ class BuildSystem(Base):
     @shell_command
     @create_pydistutils_cfg
     @copy_test_files()
-    def test(self, context, args):
-        return super().test(context, args)
+    @override
+    def test(self, context: Context, args: Args) -> str:
+        return super().test_cmd(context, args)

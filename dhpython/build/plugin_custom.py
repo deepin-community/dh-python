@@ -18,7 +18,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+from typing import override
+
 from dhpython.build.base import Base, shell_command, copy_test_files
+from dhpython.build.types import Args, Context
 
 
 class BuildSystem(Base):
@@ -26,23 +29,28 @@ class BuildSystem(Base):
     SUPPORTED_INTERPRETERS = True  # all interpreters
 
     @shell_command
-    def clean(self, context, args):
+    @override
+    def clean(self, context: Context, args: Args) -> str:
         super().clean(context, args)
-        return args['args']
+        return args.args
 
     @shell_command
-    def configure(self, context, args):
-        return args['args']
+    @override
+    def configure(self, context: Context, args: Args) -> str:
+        return args.args
 
     @shell_command
-    def build(self, context, args):
-        return args['args']
+    @override
+    def build(self, context: Context, args: Args) -> str:
+        return args.args
 
     @shell_command
-    def install(self, context, args):
-        return args['args']
+    @override
+    def install(self, context: Context, args: Args) -> str:
+        return args.args
 
-    @shell_command
     @copy_test_files()
-    def test(self, context, args):
-        return args['args'] or super().test(context, args)
+    @shell_command
+    @override
+    def test(self, context: Context, args: Args) -> str:
+        return args.args or super().test_cmd(context, args)

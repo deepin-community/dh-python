@@ -48,6 +48,16 @@ manpages: $(MANPAGES)
 dist_fallback:
 	make -C pydist $@
 
+mypy:
+	mypy --strict dh_python3 dhpython/ tests/*.py
+	mypy --strict pybuild
+
+black:
+	black $(BLACK_ARGS) pybuild dh_python3 dhpython/ pydist/*.py tests/*.py
+
+pyupgrade:
+	pyupgrade --py311-plus dh_python3 pybuild pydist/*.py tests/*.py $(shell find dhpython -name *.py)
+
 # TESTS
 nose:
 	#nosetests3 --verbose --with-doctest --with-coverage

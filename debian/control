@@ -1,6 +1,5 @@
 Source: dh-python
 Section: python
-Priority: optional
 Maintainer: Piotr Ożarowski <piotr@debian.org>
 Uploaders:
  Stefano Rivera <stefanor@debian.org>,
@@ -15,10 +14,9 @@ Build-Depends:
  python3-minimal,
  python3-nose2 <!nocheck>,
  python3-setuptools,
-Standards-Version: 4.7.2
+Standards-Version: 4.7.3
 Vcs-Git: https://salsa.debian.org/python-team/tools/dh-python.git
 Vcs-Browser: https://salsa.debian.org/python-team/tools/dh-python
-Rules-Requires-Root: no
 
 Package: dh-python
 Architecture: all
@@ -51,7 +49,6 @@ Multi-Arch: foreign
 Depends:
  dh-python (= ${source:Version}),
  python3-build (>> 0.7~),
- python3 (>> 3.11~) | python3-tomli,
  python3-installer,
  ${misc:Depends},
 Description: Debian helper tools for packaging Python libraries using PEP517
